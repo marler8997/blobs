@@ -490,10 +490,9 @@ export fn update() void {
         w4.rect(px.x, px.y, 1, 1);
     }
 
-    // draw player circle
-    for (&global.blobs, 0..) |*blob, i| {
+    // draw the blobs
+    for (&global.blobs) |*blob| {
         if (blob.eaten) continue;
-
         {
             const px = ptToPx(points_per_pixel, .{
                 .x = blob.pos_pt.x - blob.radius_pt,
@@ -504,8 +503,11 @@ export fn update() void {
             //log("player {},{} size={}", .{px.x, px.y, size});
             w4.oval(px.x, px.y, @intCast(size), @intCast(size));
         }
-
-        // draw the direction dot
+    }
+    // draw the blob directional dots (on second pass
+    // so they always appear in front of the bodies)
+    for (&global.blobs, 0..) |*blob, i| {
+        if (blob.eaten) continue;
         {
             const radius_pt: f32 = @as(f32, @floatFromInt(blob.radius_pt));
             const px = ptToPx(points_per_pixel, .{
