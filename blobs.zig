@@ -55,9 +55,10 @@ const _2pi = 2 * std.math.pi;
 var points_buf: [5000]XY(i32) = undefined;
 
 fn getRandomCoord() i32 {
-    var buf: [1]u8 = undefined;
+    var buf: [2]u8 = undefined;
     global.rand.fill(&buf);
-    const mult = @as(f32, @floatFromInt(buf[0])) / @as(f32, 256);
+    const r = std.mem.readInt(u16, &buf, .Big);
+    const mult = @as(f32, @floatFromInt(r)) / @as(f32, 65536);
     const slot: i32 = @intFromFloat(arena_half_size_pt_f32 * 2 * mult);
     return slot - arena_half_size_pt;
 }
@@ -182,7 +183,7 @@ export fn update() void {
         w4.tone(freq_arg, 5, 20, 0);
         {
             pt.* = getRandomPoint();
-            global.blob_radius_pt += 20;
+            global.blob_radius_pt += 10;
         }
     }
 
