@@ -7,6 +7,9 @@ const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
 const speed_points: f32 = 90;
 const min_radius_pt = 500;
 
+const eat_nibble_size_inc = 10;
+const max_digest_per_frame = 10;
+
 fn XY(comptime T: type) type {
     return struct { x: T, y: T };
 }
@@ -17,12 +20,32 @@ const Blob = struct {
     // Angle is in radians in the range of [0,2PI) (includes 0 but not 2PI).
     // 0 is to the right, PI/2 is upward and so on.
     angle: f32,
+    eaten: bool,
+    digesting: i32,
+};
+
+const Tone = struct {
+    frequency: u32,
+    duration: u32,
+};
+const MultiTone = struct {
+    loop: bool,
+    tones: []const Tone,
+    volume: u32,
+    flags: u32,
+    current_tone: usize = 0,
+    current_tone_frame: u32 = 0,
+    // TODO: support exta volume/pan flags!
 };
 
 const global = struct {
     pub var rand: std.rand.DefaultPrng = undefined;
-    pub var blobs: [20]Blob = undefined;
+    pub var blobs: [60]Blob = undefined;
+    pub const me = &blobs[0];
     var ai_controls = [_]Control{ .none } ** (global.blobs.len - 1);
+    var multitones_buf: [20]MultiTone = undefined;
+    var multitones_count: usize = 0;
+    var my_eat_tone_frame: ?u8 = null;
 };
 
 fn log(comptime fmt: []const u8, args: anytype) void {
@@ -90,11 +113,11 @@ fn getRandomPoint() XY(i32) {
 
 fn ptToPxX(points_per_pixel: i32, coord_x: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_x - global.blobs[0].pos_pt.x), points_per_pixel);
+    return 80 + @divTrunc((coord_x - global.me.pos_pt.x), points_per_pixel);
 }
 fn ptToPxY(points_per_pixel: i32, coord_y: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_y - global.blobs[0].pos_pt.y), points_per_pixel);
+    return 80 + @divTrunc((coord_y - global.me.pos_pt.y), points_per_pixel);
 }
 fn ptToPx(points_per_pixel: i32, pt: XY(i32)) XY(i32) {
     return XY(i32){
@@ -107,6 +130,16 @@ fn clamp(comptime T: type, val: T, min: T, max: T) T {
     if (val < min) return min;
     if (val > max) return max;
     return val;
+}
+
+fn closerToZero(val: i32, speed: i32) i32 {
+    if (speed <= 0) @panic("codebug");
+    if (val < 0) {
+        return if (-val <= speed) 0 else val + speed;
+    } else if (val > 0) {
+        return if (val <= speed) 0 else val - speed;
+    }
+    return 0;
 }
 
 fn getFreqs(radius: f32) struct { start: u16, end: u16 } {
@@ -153,37 +186,88 @@ fn updateAngle(blob: *Blob, control: Control) void {
     }
 }
 
-const max_eat_volume = 20;
+fn calcDistance(a: XY(i32), b: XY(i32)) f32 {
+    const diff_x: f32 = @floatFromInt(a.x - b.x);
+    const diff_y: f32 = @floatFromInt(a.y - b.y);
+    const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
+    if (dist < 0) @panic("codebug");
+    return dist;
+}
 
-fn eatTone(blob: *const Blob) void {
-    const freqs = getFreqs(@floatFromInt(blob.radius_pt));
-    //log("tone {} to {}", .{freqs.start, freqs.send});
-    const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
+const global_volume: f32 = 0.4;
+const max_eat_nibble_volume = 20;
+const max_eat_blob_volume = 40;
 
-    const tone: struct {
-        volume: u32,
-        pan: u32,
-    } = blk: {
-        if (blob == &global.blobs[0]) break :blk .{
-            .volume = max_eat_volume,
-            .pan = 0,
-        };
-        const diff_x: f32 = @floatFromInt(blob.pos_pt.x - global.blobs[0].pos_pt.x);
-        const diff_y: f32 = @floatFromInt(blob.pos_pt.y - global.blobs[0].pos_pt.y);
+const VolPan = struct {
+    volume: u32,
+    pan: u32,
+
+    pub fn fromPoint(pt: XY(i32), max_volume: u32) VolPan {
+        const diff_x: f32 = @floatFromInt(pt.x - global.me.pos_pt.x);
+        const diff_y: f32 = @floatFromInt(pt.y - global.me.pos_pt.y);
         const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
-        if (dist < 0) @panic("impossible?");
+        if (dist < 0) @panic("codebug");
         const max_distance = arena_half_size_pt_f32 * 1.5;
         const ratio: f32 = 1.0 - @min(dist, max_distance) / max_distance;
         const pan_threshold = arena_half_size_pt_f32 / 3;
-        break :blk .{
-            .volume = @intFromFloat((ratio*ratio) * (max_eat_volume * 0.4)),
+        return .{
+            .volume = @intFromFloat((ratio*ratio) * (
+                @as(f32, @floatFromInt(max_volume)) * global_volume
+            )),
             .pan =
                 if (diff_x > pan_threshold) w4.TONE_PAN_RIGHT
                 else if (diff_x < -pan_threshold) w4.TONE_PAN_LEFT
                 else 0
         };
+    }
+};
+
+const eat_blob_multitone = [_]Tone{
+    .{ .frequency = 0x00500032, .duration = 10 },
+    .{ .frequency = 0x00320050, .duration = 10 },
+    .{ .frequency = 0x00500032, .duration = 10 },
+    .{ .frequency = 0x00320050, .duration = 10 },
+};
+
+fn eatBlobTone(eater: *const Blob) void {
+    if (global.multitones_count == global.multitones_buf.len) {
+        log("WARNING!!! can't play eatBlobTone, out of multitone slots!", .{});
+        return;
+    }
+    const vp: VolPan = if (eater == global.me) .{
+        .volume = max_eat_blob_volume,
+        .pan = 0,
+    } else VolPan.fromPoint(eater.pos_pt, max_eat_blob_volume);
+    global.multitones_buf[global.multitones_count] = .{
+        .loop = false,
+        .tones = &eat_blob_multitone,
+        .volume = vp.volume,
+        .flags = vp.pan | w4.TONE_PULSE1,
     };
-    w4.tone(freq_arg, 5, tone.volume, tone.pan);
+    global.multitones_count += 1;
+}
+
+const eat_tone_duration = 5;
+fn eatTone(blob: *const Blob) void {
+    // don't cut off the player's eat tone
+    const is_me = blob == global.me;
+    if (is_me) {
+        global.my_eat_tone_frame = 1;
+    } else if (global.my_eat_tone_frame) |_| {
+        // don't cut off the player's eat tone, we all share
+        // the same oscillator
+        // TODO: we could put the sound in a deferred queue
+        return;
+    }
+
+    const freqs = getFreqs(@floatFromInt(blob.radius_pt));
+    //log("tone {} to {}", .{freqs.start, freqs.send});
+    const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
+    const vp: VolPan = if (is_me) .{
+        .volume = max_eat_nibble_volume,
+        .pan = 0,
+    } else VolPan.fromPoint(blob.pos_pt, max_eat_nibble_volume);
+    w4.tone(freq_arg, eat_tone_duration, vp.volume, vp.pan | w4.TONE_TRIANGLE);
 }
 
 export fn start() void {
@@ -191,28 +275,74 @@ export fn start() void {
     for (&points_buf) |*pt| {
         pt.* = getRandomPoint();
     }
-    global.blobs[0] = .{
+    global.me.* = .{
         .pos_pt = .{ .x = 0, .y = 0 },
         .radius_pt = min_radius_pt,
         .angle = 0,
+        .eaten = false,
+        .digesting = 0,
     };
     for (global.blobs[1..], 0..) |*other, i| {
         other.* = .{
             .pos_pt = getRandomPoint(),
             .radius_pt = min_radius_pt,
             .angle = _2pi * getRandomScale(2),
+            .eaten = false,
+            .digesting = 0,
         };
         global.ai_controls[i] = .none;
     }
 }
 
 export fn update() void {
-    updateAngle(&global.blobs[0], getControl(
+
+    // update multitone sounds
+    {
+        var mt_index: usize = 0;
+        while (mt_index < global.multitones_count) {
+            const mt = &global.multitones_buf[mt_index];
+            mt.current_tone_frame += 1;
+            if (mt.current_tone_frame > mt.tones[mt.current_tone].duration) {
+                // TODO: handline looping multitones?
+                mt.current_tone += 1;
+                mt.current_tone_frame = 1;
+                if (mt.current_tone >= mt.tones.len) {
+                    if (mt.loop) {
+                        mt.current_tone = 0;
+                    } else {
+                        std.mem.copyForwards(
+                            MultiTone,
+                            global.multitones_buf[mt_index..global.multitones_count-1],
+                            global.multitones_buf[mt_index+1..global.multitones_count],
+                        );
+                        global.multitones_count -= 1;
+                        continue;
+                    }
+                }
+            }
+            if (mt.current_tone_frame == 1) {
+                const t = &mt.tones[mt.current_tone];
+                //log("playing tone freq {} dur {} vol {}", .{t.frequency, t.duration, t.volume});
+                w4.tone(t.frequency, t.duration, mt.volume, mt.flags);
+            }
+            mt_index += 1;
+        }
+    }
+
+    if (global.my_eat_tone_frame) |*f| {
+        f.* = f.* + 1;
+        if (f.* >= eat_tone_duration) {
+            global.my_eat_tone_frame = null;
+        }
+    }
+
+    updateAngle(global.me, getControl(
         0 != (w4.GAMEPAD1.* & w4.BUTTON_LEFT),
         0 != (w4.GAMEPAD1.* & w4.BUTTON_RIGHT),
     ));
 
     for (global.blobs[1..], 0..) |*blob, i| {
+        if (blob.eaten) continue;
         const control_ref = &global.ai_controls[i];
         {
             var buf: [1]u8 = undefined;
@@ -236,16 +366,39 @@ export fn update() void {
         updateAngle(blob, control_ref.*);
     }
 
+    // if we're dead...slowly zoom out...lol!
+    // TODO: show a "YOU DIED" on the screen
+    if (global.me.eaten) {
+        if (global.me.radius_pt < arena_half_size_pt * 1 / 8) {
+            global.me.radius_pt += 20;
+        }
+        if (global.me.pos_pt.x != 0 or global.me.pos_pt.y != 0) {
+            global.me.pos_pt = .{
+                .x = closerToZero(global.me.pos_pt.x, 100),
+                .y = closerToZero(global.me.pos_pt.y, 100),
+            };
+        }
+    }
+
     // custom size change control (for development)
     switch (getControl(
         0 != (w4.GAMEPAD1.* & w4.BUTTON_DOWN),
         0 != (w4.GAMEPAD1.* & w4.BUTTON_UP),
     )) {
         .none => {},
-        .dec => global.blobs[0].radius_pt = @max(
-            global.blobs[0].radius_pt - 10, 10
+        .dec => global.me.radius_pt = @max(
+            global.me.radius_pt - 10, 10
         ),
-        .inc => global.blobs[0].radius_pt += 10,
+        .inc => global.me.radius_pt += 10,
+    }
+
+    // blobs digest
+    for (&global.blobs) |*blob| {
+        if (blob.digesting != 0) {
+            const digest = @min(max_digest_per_frame, blob.digesting);
+            blob.radius_pt += digest;
+            blob.digesting -= digest;
+        }
     }
 
     var sines: [global.blobs.len]f32 = undefined;
@@ -253,6 +406,7 @@ export fn update() void {
 
     // move blobs
     for (&global.blobs, 0..) |*blob, i| {
+        if (blob.eaten) continue;
         // TODO: get slower as you get bigger
         sines[i] = std.math.sin(blob.angle);
         cosines[i] = std.math.cos(blob.angle);
@@ -268,27 +422,45 @@ export fn update() void {
     }
 
     // TODO: this *might* need some optimization?
+    for (&global.blobs, 0..) |*blob, i| {
+        if (blob.eaten) continue;
+        for (global.blobs[i+1..]) |*other_blob| {
+            if (other_blob.eaten) continue;
+            const dist: i32 = @intFromFloat(@floor(calcDistance(blob.pos_pt, other_blob.pos_pt)));
+            if (dist > blob.radius_pt and dist > other_blob.radius_pt)
+                continue;
+
+            const blobs: struct {
+                eater: *Blob,
+                eaten: *Blob,
+            } = if (blob.radius_pt > other_blob.radius_pt)
+                .{ .eater = blob, .eaten = other_blob }
+            else if (other_blob.radius_pt > blob.radius_pt)
+                .{ .eater = other_blob, .eaten = blob }
+            else continue;
+            eatBlobTone(blobs.eater);
+            blobs.eater.digesting += blobs.eaten.radius_pt;
+            blobs.eaten.eaten = true;
+        }
+    }
     for (&global.blobs) |*blob| {
+        if (blob.eaten) continue;
         for (&points_buf) |*pt| {
-            const diff_x: f32 = @floatFromInt(pt.x - blob.pos_pt.x);
-            const diff_y: f32 = @floatFromInt(pt.y - blob.pos_pt.y);
-            const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
-            if (dist < 0) @panic("here"); // impossible right?
+            const dist = calcDistance(pt.*, blob.pos_pt);
             if (dist >= @as(f32, @floatFromInt(blob.radius_pt))) continue;
 
             //log("eat point {}!", .{i});
             eatTone(blob);
             {
                 pt.* = getRandomPoint();
-                blob.radius_pt += 10;
+                blob.radius_pt += eat_nibble_size_inc;
             }
         }
     }
 
-
     const desired_blob_radius_px = 10;
     const points_per_pixel: i32 = @divTrunc(
-        global.blobs[0].radius_pt,
+        global.me.radius_pt,
         desired_blob_radius_px
     );
     drawBars(points_per_pixel, .x);
@@ -303,6 +475,8 @@ export fn update() void {
 
     // draw player circle
     for (&global.blobs, 0..) |*blob, i| {
+        if (blob.eaten) continue;
+
         {
             const px = ptToPx(points_per_pixel, .{
                 .x = blob.pos_pt.x - blob.radius_pt,
@@ -349,8 +523,8 @@ export fn update() void {
             &buf,
             "{},{}",
             .{
-                @divTrunc(global.blobs[0].pos_pt.x, 100),
-                @divTrunc(global.blobs[0].pos_pt.y, 100),
+                @divTrunc(global.me.pos_pt.x, 100),
+                @divTrunc(global.me.pos_pt.y, 100),
             },
         ) catch @panic("codebug");
         w4.DRAW_COLORS.* = 0x04;
