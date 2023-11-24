@@ -5,6 +5,7 @@ const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
 
 const speed_points: f32 = 90;
+const min_radius_pt = 500;
 
 fn XY(comptime T: type) type {
     return struct { x: T, y: T };
@@ -12,7 +13,7 @@ fn XY(comptime T: type) type {
 const global = struct {
     pub var rand: std.rand.DefaultPrng = undefined;
     pub var pos = XY(i32){ .x = 0, .y = 0 };
-    pub var blob_radius_pt: i32 = 1000;
+    pub var blob_radius_pt: i32 = min_radius_pt;
     // Angle is in radians in the range of [0,2PI) (includes 0 but not 2PI).
     // 0 is to the right, PI/2 is upward and so on.
     pub var angle: f32 = 0;
@@ -89,6 +90,30 @@ fn clamp(comptime T: type, val: T, min: T, max: T) T {
     return val;
 }
 
+fn getFreqs(radius: f32) struct { start: u16, end: u16 } {
+    //log("radius {}", .{@as(i32, @intFromFloat(@floor(radius)))});
+    if (radius <= min_radius_pt * 2) return .{
+        .start = 2000,
+        .end   = 5000,
+    };
+    if (radius <= min_radius_pt * 4) return .{
+        .start = 1000,
+        .end   = 2000,
+    };
+    if (radius <= min_radius_pt * 8) return .{
+        .start = 400,
+        .end   = 1000,
+    };
+    if (radius <= min_radius_pt * 16) return .{
+        .start = 100,
+        .end   = 400,
+    };
+    return .{
+        .start = 50,
+        .end   = 100,
+    };
+}
+
 export fn start() void {
     global.rand = std.rand.DefaultPrng.init(0);
     for (&points_buf) |*pt| {
@@ -151,12 +176,10 @@ export fn update() void {
         if (dist < 0) @panic("here"); // impossible right?
         if (dist >= @as(f32, @floatFromInt(global.blob_radius_pt))) continue;
         //log("eat point {}!", .{i});
-        const radius_pt_ft: f32 = @floatFromInt(global.blob_radius_pt);
-        const freq_beg: u16 = 30 + @as(u16, @intFromFloat(500000 / radius_pt_ft));
-        const freq_end: u16 = 30 + @as(u16, @intFromFloat(400000 / radius_pt_ft));
-        //log("tone {} to {}", .{freq_beg, freq_end});
-        const freq = @as(u32, freq_beg) << 16 | freq_end;
-        w4.tone(freq, 5, 20, 0);
+        const freqs = getFreqs(@floatFromInt(global.blob_radius_pt));
+        //log("tone {} to {}", .{freqs.start, freqs.send});
+        const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
+        w4.tone(freq_arg, 5, 20, 0);
         {
             pt.* = getRandomPoint();
             global.blob_radius_pt += 20;
