@@ -499,7 +499,7 @@ export fn update() void {
                 .x = blob.pos_pt.x - blob.radius_pt,
                 .y = blob.pos_pt.y - blob.radius_pt,
             });
-            w4.DRAW_COLORS.* = 0x03;
+            w4.DRAW_COLORS.* = 0x33;
             const size: i32 = @divTrunc(blob.radius_pt * 2, points_per_pixel);
             //log("player {},{} size={}", .{px.x, px.y, size});
             w4.oval(px.x, px.y, @intCast(size), @intCast(size));
@@ -512,7 +512,7 @@ export fn update() void {
                 .x = blob.pos_pt.x + @as(i32, @intFromFloat(radius_pt * cosines[i])),
                 .y = blob.pos_pt.y + @as(i32, @intFromFloat(radius_pt * sines[i])),
             });
-            w4.DRAW_COLORS.* = 0x41;
+            w4.DRAW_COLORS.* = 0x43;
             w4.oval(px.x - 2, px.y - 2, 4, 4);
         }
     }
