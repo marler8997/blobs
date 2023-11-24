@@ -298,14 +298,14 @@ export fn start() void {
         w4.PALETTE.* = [4]u32{
             0xFFFFFF,
             0xFCEADE,
-            0xFF8A5B,
+            0xFF8A30,
             0x25CED1,
         };
     } else {
         w4.PALETTE.* = [4]u32{
-            0x333333,
+            0x293133,
             0x384250,
-            0xDE6A3B,
+            0xD96520,
             0x25BEC1,
         };
     }
