@@ -534,7 +534,8 @@ export fn update() void {
         );
     }
 
-    {
+    const draw_position = false;
+    if (draw_position) {
         var buf: [100]u8 = undefined;
         const str = std.fmt.bufPrint(
             &buf,
