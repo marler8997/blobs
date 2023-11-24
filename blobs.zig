@@ -153,6 +153,39 @@ fn updateAngle(blob: *Blob, control: Control) void {
     }
 }
 
+const max_eat_volume = 20;
+
+fn eatTone(blob: *const Blob) void {
+    const freqs = getFreqs(@floatFromInt(blob.radius_pt));
+    //log("tone {} to {}", .{freqs.start, freqs.send});
+    const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
+
+    const tone: struct {
+        volume: u32,
+        pan: u32,
+    } = blk: {
+        if (blob == &global.blobs[0]) break :blk .{
+            .volume = max_eat_volume,
+            .pan = 0,
+        };
+        const diff_x: f32 = @floatFromInt(blob.pos_pt.x - global.blobs[0].pos_pt.x);
+        const diff_y: f32 = @floatFromInt(blob.pos_pt.y - global.blobs[0].pos_pt.y);
+        const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
+        if (dist < 0) @panic("impossible?");
+        const max_distance = arena_half_size_pt_f32 * 1.5;
+        const ratio: f32 = 1.0 - @min(dist, max_distance) / max_distance;
+        const pan_threshold = arena_half_size_pt_f32 / 3;
+        break :blk .{
+            .volume = @intFromFloat((ratio*ratio) * (max_eat_volume * 0.4)),
+            .pan =
+                if (diff_x > pan_threshold) w4.TONE_PAN_RIGHT
+                else if (diff_x < -pan_threshold) w4.TONE_PAN_LEFT
+                else 0
+        };
+    };
+    w4.tone(freq_arg, 5, tone.volume, tone.pan);
+}
+
 export fn start() void {
     global.rand = std.rand.DefaultPrng.init(0);
     for (&points_buf) |*pt| {
@@ -242,11 +275,9 @@ export fn update() void {
             const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
             if (dist < 0) @panic("here"); // impossible right?
             if (dist >= @as(f32, @floatFromInt(blob.radius_pt))) continue;
+
             //log("eat point {}!", .{i});
-            const freqs = getFreqs(@floatFromInt(blob.radius_pt));
-            //log("tone {} to {}", .{freqs.start, freqs.send});
-            const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
-            w4.tone(freq_arg, 5, 20, 0);
+            eatTone(blob);
             {
                 pt.* = getRandomPoint();
                 blob.radius_pt += 10;
