@@ -219,9 +219,9 @@ export fn update() void {
             global.rand.fill(&buf);
             switch (control_ref.*) {
                 .none => switch (buf[0]) {
-                    0...39 => control_ref.* = .dec,
-                    40...79 => control_ref.* = .inc,
-                    80...255 => {},
+                    0...29 => control_ref.* = .dec,
+                    30...59 => control_ref.* = .inc,
+                    60...255 => {},
                 },
                 .dec => switch (buf[0]) {
                     0...39 => control_ref.* = .none,
