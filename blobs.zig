@@ -292,6 +292,23 @@ export fn start() void {
         };
         global.ai_controls[i] = .none;
     }
+
+    const light_mode = false;
+    if (light_mode) {
+        w4.PALETTE.* = [4]u32{
+            0xFFFFFF,
+            0xFCEADE,
+            0xFF8A5B,
+            0x25CED1,
+        };
+    } else {
+        w4.PALETTE.* = [4]u32{
+            0x333333,
+            0x384250,
+            0xDE6A3B,
+            0x25BEC1,
+        };
+    }
 }
 
 export fn update() void {
