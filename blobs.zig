@@ -7,7 +7,10 @@ const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
 
 const base_speed_pt: f32 = 90;
+const max_size_penalty = 80;
 const min_radius_pt = 500;
+const max_radius_pt = arena_half_size_pt;
+const radius_range_pt = max_radius_pt - min_radius_pt;
 
 const eat_nibble_size_inc = 10;
 const max_digest_per_frame = 10;
@@ -551,7 +554,12 @@ fn updatePlayMode(play: *Play) void {
         sines[i] = std.math.sin(blob.angle);
         cosines[i] = std.math.cos(blob.angle);
 
-        const speed_pt = if (blob.dashing) base_speed_pt * 2 else base_speed_pt;
+        const penalty_multipler: f32 = @as(
+            f32, @max(0, @as(f32, @floatFromInt(blob.radius_pt - min_radius_pt)))
+        ) / @as(f32, radius_range_pt);
+        const penalty: f32 = penalty_multipler * @as(f32, max_size_penalty);
+        var speed_pt = (if (blob.dashing) base_speed_pt * 2 else base_speed_pt) - penalty;
+
         const diff_x: i32 = @intFromFloat(@floor(speed_pt * cosines[i]));
         const diff_y: i32 = @intFromFloat(@floor(speed_pt * sines[i]));
         const min: i32 = -arena_half_size_pt + blob.radius_pt;
