@@ -55,9 +55,17 @@ const Play = struct {
 };
 const Settings = struct {
     button1_released: bool = false,
+    button_left_released: bool = false,
+    button_right_released: bool = false,
+    button_up_released: bool = false,
+    button_down_released: bool = false,
+    selection: enum {
+        appearance,
+    } = .appearance,
 };
 
 const global = struct {
+    var disk_state = [_]u8 { 0 } ** 1;
     pub var rand_seed: u8 = 0;
     pub var mode: union(enum) {
         start_menu: StartMenu,
@@ -295,23 +303,60 @@ fn eatTone(blob: *const Blob) void {
     w4.tone(freq_arg, eat_tone_duration, vp.volume, vp.pan | w4.TONE_TRIANGLE);
 }
 
-export fn start() void {
-    const light_mode = false;
-    if (light_mode) {
-        w4.PALETTE.* = [4]u32{
-            0xFFFFFF,
-            0xFCEADE,
-            0xFF8A30,
-            0x25CED1,
-        };
+const disk_state_flag = struct {
+    pub const light_mode = 1;
+};
+fn setDiskState(mask: u8, value: u1) void {
+    switch (value) {
+        0 => global.disk_state[0] &= ~mask,
+        1 => global.disk_state[0] |= mask,
+    }
+    const len = w4.diskw(&global.disk_state, global.disk_state.len);
+    if (len != global.disk_state.len) {
+        log("failed to write state to disk", .{});
     } else {
-        w4.PALETTE.* = [4]u32{
+        log("wrote {} bytes to disk", .{len});
+    }
+}
+
+const Appearance = enum { dark, light };
+
+fn getAppearance() Appearance {
+    const state = global.disk_state[0] & disk_state_flag.light_mode;
+    return if (0 == state) .dark else .light;
+}
+fn applyAppearance() void {
+    w4.PALETTE.* = switch (getAppearance()) {
+        .dark => [4]u32{
             0x293133,
             0x384250,
             0xD96520,
             0x25BEC1,
-        };
+        },
+        .light => [4]u32{
+            0xFFFFFF,
+            0xFCEADE,
+            0xFF8A30,
+            0x25CED1,
+        },
+    };
+}
+fn changeAppearance(a: Appearance) void {
+    setDiskState(
+        disk_state_flag.light_mode,
+        switch (a) { .dark => 0, .light => 1 },
+    );
+    applyAppearance();
+}
+
+export fn start() void {
+    const len = w4.diskr(&global.disk_state, global.disk_state.len);
+    if (len == 0) {
+        log("no disk state", .{});
+    } else {
+        log("read {} bytes from disk", .{len});
     }
+    applyAppearance();
     initStartMenu();
 }
 
@@ -336,8 +381,11 @@ fn initStartMenu() void {
 // the button was ever in a released state.  This prevents the mode
 // from immediately changing multiple times when the button
 // is held down accross multiple frames.
-fn isModeChangeButtonTriggered(released_state_ref: *bool) bool {
-    const pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
+fn isButtonTriggered(
+    button: u32,
+    released_state_ref: *bool,
+) bool {
+    const pressed = (0 != (w4.GAMEPAD1.* & button));
     if (!released_state_ref.*) {
         if (!pressed) {
             released_state_ref.* = true;
@@ -380,7 +428,9 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     textCenter("Press \x80 to start", 130);
     tickMultitones();
 
-    if (!isModeChangeButtonTriggered(&start_menu.button1_released))
+    if (!isButtonTriggered(
+        w4.BUTTON_1, &start_menu.button1_released
+    ))
         return;
 
     w4.tracef("random seed: %d", global.rand_seed);
@@ -414,7 +464,9 @@ fn updateStartMenu(start_menu: *StartMenu) void {
 }
 
 fn updateSettingsMode(settings: *Settings) void {
-    if (isModeChangeButtonTriggered(&settings.button1_released)) {
+    if (isButtonTriggered(
+        w4.BUTTON_1, &settings.button1_released
+    )) {
         // NOTE: this will invalidate `settings` so we
         //       return right after setting it
         global.mode = .{ .play = .{
@@ -423,8 +475,39 @@ fn updateSettingsMode(settings: *Settings) void {
         return;
     }
 
+    if (isButtonTriggered(
+        w4.BUTTON_RIGHT,
+        &settings.button_right_released,
+    )) {
+        switch (settings.selection) {
+            .appearance => changeAppearance(.light),
+        }
+    }
+    if (isButtonTriggered(
+        w4.BUTTON_LEFT,
+        &settings.button_left_released,
+    )) {
+        switch (settings.selection) {
+            .appearance => changeAppearance(.dark),
+        }
+    }
+
+
+    if (settings.selection == .appearance) {
+        w4.DRAW_COLORS.* = 0x43;
+        w4.oval(11, 11, 5, 5);
+    }
+    {
+        const box_x: i32 = switch (getAppearance()) {
+            .dark => 20,
+            .light => 72,
+        };
+        w4.DRAW_COLORS.* = 0x40;
+        w4.rect(box_x, 7, 48, 13);
+    }
     w4.DRAW_COLORS.* = 0x3;
-    textCenter("TODO: Settings", 76);
+    w4.text("Dark", 28, 10);
+    w4.text("Light", 76, 10);
     textCenter("Return To Game \x80", 146);
 }
 
@@ -468,7 +551,7 @@ fn tickMultitones() void {
 
 fn updatePlayMode(play: *Play) void {
     // check if the user wants to enter the settings
-    if (isModeChangeButtonTriggered(&play.button1_released)) {
+    if (isButtonTriggered(w4.BUTTON_1, &play.button1_released)) {
         // NOTE: this will invalidate `play` so we
         //       return right after setting it
         global.mode = .{ .settings = .{} };
