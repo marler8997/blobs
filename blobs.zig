@@ -17,9 +17,9 @@ const eat_nibble_size_inc = 10;
 const max_digest_per_frame = 10;
 
 const intro_messages = [_][]const u8 {
-    "Be Blobful and\nBlobify!",
+    "Be Fruitful and\nBlob!",
     "Take off\nevery Blob!",
-    "All your blob are\nbelong to us!",
+    "All your Blob are\nbelong to us!",
 };
 
 fn XY(comptime T: type) type {
