@@ -1,5 +1,6 @@
 const std = @import("std");
 const w4 = @import("wasm4.zig");
+const startlogo = @import("startlogo.zig");
 const music = @import("music.zig");
 const Tone = music.Tone;
 
@@ -362,11 +363,21 @@ export fn update() void {
 fn updateStartMenu(start_menu: *StartMenu) void {
     // TODO: play cool music
     global.rand_seed +%= 1;
-    w4.DRAW_COLORS.* = 0x03;
-    // TODO: make this a cool graphic intead
-    w4.text("BLOBS", 60, 40);
+    w4.DRAW_COLORS.* = 0x0430;
+    w4.blit(
+        &startlogo.blobs,
+        (160 - startlogo.blobs_width) / 2, 10,
+         startlogo.blobs_width,
+        startlogo.blobs_height,
+        w4.BLIT_2BPP,
+    );
+    w4.DRAW_COLORS.* = 0x02;
+    textCenter("Controls:", 70);
+    w4.DRAW_COLORS.* = 0x02;
+    w4.text("Direction: \x84 \x85", 25, 85);
+    w4.text("Dash: \x81", 25, 98);
     w4.DRAW_COLORS.* = 0x04;
-    w4.text("Press \x80 to start", 16, 76);
+    textCenter("Press \x80 to start", 130);
     tickMultitones();
 
     if (!isModeChangeButtonTriggered(&start_menu.button1_released))
@@ -524,15 +535,18 @@ fn updatePlayMode(play: *Play) void {
     }
 
     // custom size change control (for development)
-    switch (getControl(
-        0 != (w4.GAMEPAD1.* & w4.BUTTON_DOWN),
-        0 != (w4.GAMEPAD1.* & w4.BUTTON_UP),
-    )) {
-        .none => {},
-        .dec => global.me.radius_pt = @max(
-            global.me.radius_pt - 10, 10
-        ),
-        .inc => global.me.radius_pt += 10,
+    const cheat = false;
+    if (cheat) {
+        switch (getControl(
+            0 != (w4.GAMEPAD1.* & w4.BUTTON_DOWN),
+            0 != (w4.GAMEPAD1.* & w4.BUTTON_UP),
+        )) {
+            .none => {},
+            .dec => global.me.radius_pt = @max(
+                global.me.radius_pt - 10, 10
+            ),
+            .inc => global.me.radius_pt += 10,
+        }
     }
 
     // blobs digest
@@ -682,7 +696,6 @@ fn updatePlayMode(play: *Play) void {
                 textCenter(line, 30 + (12*line_num));
             }
             w4.DRAW_COLORS.* = 2;
-            textCenter("DASH \x81", 120);
             textCenter("Settings \x80", 140);
         }
     }
