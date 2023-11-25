@@ -10,6 +10,12 @@ const min_radius_pt = 500;
 const eat_nibble_size_inc = 10;
 const max_digest_per_frame = 10;
 
+const intro_messages = [_][]const u8 {
+    "Be Blobful and\nBlobify!",
+    "Take off\nevery Blob!",
+    "All your blob are\nbelong to us!",
+};
+
 fn XY(comptime T: type) type {
     return struct { x: T, y: T };
 }
@@ -35,10 +41,23 @@ const MultiTone = struct {
     flags: u32,
     current_tone: usize = 0,
     current_tone_frame: u32 = 0,
-    // TODO: support exta volume/pan flags!
+};
+
+const Play = struct {
+    button1_released: bool = false,
+    intro_frame: ?u32,
+};
+const Settings = struct {
+    button1_released: bool = false,
 };
 
 const global = struct {
+    pub var rand_seed: u8 = 0;
+    pub var mode: union(enum) {
+        start_menu: void,
+        play: Play,
+        settings: Settings,
+    } = .start_menu;
     pub var rand: std.rand.DefaultPrng = undefined;
     pub var blobs: [60]Blob = undefined;
     pub const me = &blobs[0];
@@ -271,7 +290,50 @@ fn eatTone(blob: *const Blob) void {
 }
 
 export fn start() void {
-    global.rand = std.rand.DefaultPrng.init(0);
+    const light_mode = false;
+    if (light_mode) {
+        w4.PALETTE.* = [4]u32{
+            0xFFFFFF,
+            0xFCEADE,
+            0xFF8A30,
+            0x25CED1,
+        };
+    } else {
+        w4.PALETTE.* = [4]u32{
+            0x293133,
+            0x384250,
+            0xD96520,
+            0x25BEC1,
+        };
+    }
+}
+
+export fn update() void {
+    switch (global.mode) {
+        .start_menu => updateStartMenu(),
+        // TODO: minify these 2 cases and file a bug, they cause the
+        //       compiler to crash on windows
+        //.settings => |*s| updateSettingsMode(s),
+        .settings => updateSettingsMode(&global.mode.settings),
+        //.play => |*p| updatePlayMode(p),
+        .play => updatePlayMode(&global.mode.play),
+    }
+}
+
+fn updateStartMenu() void {
+    // TODO: play cool music
+    global.rand_seed +%= 1;
+    w4.DRAW_COLORS.* = 0x03;
+    // TODO: make this a cool graphic intead
+    w4.text("BLOBS", 60, 40);
+    w4.DRAW_COLORS.* = 0x04;
+    w4.text("Press \x80 to start", 16, 76);
+
+    if (0 == (w4.GAMEPAD1.* & w4.BUTTON_1))
+        return;
+
+    w4.tracef("random seed: %d", global.rand_seed);
+    global.rand = std.rand.DefaultPrng.init(global.rand_seed);
     for (&points_buf) |*pt| {
         pt.* = getRandomPoint();
     }
@@ -292,26 +354,52 @@ export fn start() void {
         };
         global.ai_controls[i] = .none;
     }
-
-    const light_mode = false;
-    if (light_mode) {
-        w4.PALETTE.* = [4]u32{
-            0xFFFFFF,
-            0xFCEADE,
-            0xFF8A30,
-            0x25CED1,
-        };
-    } else {
-        w4.PALETTE.* = [4]u32{
-            0x293133,
-            0x384250,
-            0xD96520,
-            0x25BEC1,
-        };
-    }
+    global.mode = .{ .play = .{
+        .intro_frame = 0, // do show intro frame
+    } };
 }
 
-export fn update() void {
+fn updateSettingsMode(settings: *Settings) void {
+    {
+        const button1_pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
+        if (!settings.button1_released) {
+            if (!button1_pressed) {
+                settings.button1_released = true;
+            }
+        } else if (button1_pressed) {
+            // NOTE: this will invalidate `settings` so we
+            //       return right after setting it
+            global.mode = .{ .play = .{
+                .intro_frame = null, // don't show intro frame
+            } };
+            return;
+        }
+    }
+
+    w4.DRAW_COLORS.* = 0x3;
+    textCenter("TODO: Settings", 76);
+    textCenter("Return To Game \x80", 146);
+}
+
+fn textCenter(str: []const u8, y: i32) void {
+    w4.text(str, @intCast((160 - str.len * 8) / 2), y);
+}
+
+fn updatePlayMode(play: *Play) void {
+    // check if the user wants to enter the settings
+    {
+        const button1_pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
+        if (!play.button1_released) {
+            if (!button1_pressed) {
+                play.button1_released = true;
+            }
+        } else if (button1_pressed) {
+            // NOTE: this will invalidate `play` so we
+            //       return right after setting it
+            global.mode = .{ .settings = .{} };
+            return;
+        }
+    }
 
     // update multitone sounds
     {
@@ -534,6 +622,24 @@ export fn update() void {
             @intCast(bottom_right.x - top_left.x),
             @intCast(bottom_right.y - top_left.y),
         );
+    }
+
+    if (play.intro_frame) |*frame| {
+        frame.* += 1;
+        // 3 seconds
+        if (frame.* == 3 * 60) {
+            play.intro_frame = null;
+        } else {
+            w4.DRAW_COLORS.* = 4;
+            const msg = intro_messages[global.rand_seed % intro_messages.len];
+            var it = std.mem.split(u8, msg, "\n");
+            var line_num: i32 = 0;
+            while (it.next()) |line| : (line_num += 1) {
+                textCenter(line, 30 + (12*line_num));
+            }
+            w4.DRAW_COLORS.* = 2;
+            textCenter("Settings \x80", 140);
+        }
     }
 
     const draw_position = false;
