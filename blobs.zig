@@ -6,7 +6,7 @@ const Tone = music.Tone;
 const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
 
-const speed_points: f32 = 90;
+const base_speed_pt: f32 = 90;
 const min_radius_pt = 500;
 
 const eat_nibble_size_inc = 10;
@@ -28,6 +28,7 @@ const Blob = struct {
     // Angle is in radians in the range of [0,2PI) (includes 0 but not 2PI).
     // 0 is to the right, PI/2 is upward and so on.
     angle: f32,
+    dashing: bool,
     eaten: bool,
     digesting: i32,
 };
@@ -377,6 +378,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
         .pos_pt = .{ .x = 0, .y = 0 },
         .radius_pt = min_radius_pt,
         .angle = 0,
+        .dashing = false,
         .eaten = false,
         .digesting = 0,
     };
@@ -385,6 +387,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
             .pos_pt = getRandomPoint(),
             .radius_pt = min_radius_pt,
             .angle = _2pi * getRandomScale(2),
+            .dashing = false,
             .eaten = false,
             .digesting = 0,
         };
@@ -472,6 +475,12 @@ fn updatePlayMode(play: *Play) void {
         0 != (w4.GAMEPAD1.* & w4.BUTTON_RIGHT),
     ));
 
+    if (0 != (w4.GAMEPAD1.* & w4.BUTTON_2)) {
+        global.me.dashing = true;
+    } else {
+        global.me.dashing = false;
+    }
+
     for (global.blobs[1..], 0..) |*blob, i| {
         if (blob.eaten) continue;
         const control_ref = &global.ai_controls[i];
@@ -542,8 +551,9 @@ fn updatePlayMode(play: *Play) void {
         sines[i] = std.math.sin(blob.angle);
         cosines[i] = std.math.cos(blob.angle);
 
-        const diff_x: i32 = @intFromFloat(@floor(speed_points * cosines[i]));
-        const diff_y: i32 = @intFromFloat(@floor(speed_points * sines[i]));
+        const speed_pt = if (blob.dashing) base_speed_pt * 2 else base_speed_pt;
+        const diff_x: i32 = @intFromFloat(@floor(speed_pt * cosines[i]));
+        const diff_y: i32 = @intFromFloat(@floor(speed_pt * sines[i]));
         const min: i32 = -arena_half_size_pt + blob.radius_pt;
         const max: i32 =  arena_half_size_pt - blob.radius_pt;
         blob.pos_pt = .{
@@ -664,6 +674,7 @@ fn updatePlayMode(play: *Play) void {
                 textCenter(line, 30 + (12*line_num));
             }
             w4.DRAW_COLORS.* = 2;
+            textCenter("DASH \x81", 120);
             textCenter("Settings \x80", 140);
         }
     }
