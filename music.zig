@@ -3,14 +3,14 @@ pub const Tone = struct {
     duration: u32,
 };
 
-const g3: u32 = 0x00c4;
+const g3: u32 = 196;
 const a3: u32 = 220;
 const b3: u32 = 247;
-const c4: u32 = 0x0106;
+const c4: u32 = 262;
 const d4: u32 = 294;
 const e4: u32 = 330;
 const f4: u32 = 349;
-const g4: u32 = 0x0188;
+const g4: u32 = 392;
 const a4: u32 = 440;
 const b4: u32 = 494;
 const c5: u32 = 523;
@@ -26,9 +26,12 @@ pub const bass = [_]Tone{
     .{ .frequency = 0, .duration = 30 },
     .{ .frequency = c4, .duration = 20 },
     .{ .frequency = g4, .duration = 10 },
-    .{ .frequency = g3, .duration = 30 },
-    .{ .frequency = a3, .duration = 30 },
-    .{ .frequency = b3, .duration = 30 },
+    .{ .frequency = g3, .duration = 20 },
+    .{ .frequency = g4, .duration = 10 },
+    .{ .frequency = a3, .duration = 20 },
+    .{ .frequency = g4, .duration = 10 },
+    .{ .frequency = b3, .duration = 20 },
+    .{ .frequency = g4, .duration = 10 },
     //
     .{ .frequency = c4, .duration = 20 },
     .{ .frequency = g4, .duration = 10 },

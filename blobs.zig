@@ -364,7 +364,7 @@ fn initStartMenu() void {
     global.multitones_buf[0] = .{
         .loop = false,
         .tones = &music.bass,
-        .volume = 30,
+        .volume = 50,
         .flags = w4.TONE_TRIANGLE,
     };
     global.multitones_buf[1] = .{
@@ -515,6 +515,21 @@ fn textCenter(str: []const u8, y: i32) void {
     w4.text(str, @intCast((160 - str.len * 8) / 2), y);
 }
 
+fn changePitchOne(freq: u16, semitones: f32) u16 {
+    if (freq == 0) return 0;
+    const freq_f32 = @as(f32, @floatFromInt(freq));
+    return @intFromFloat(@round(freq_f32 * std.math.pow(
+        f32,
+        @exp2(1.0 / 12.0),
+        semitones,
+    )));
+}
+
+fn changePitch(tone_arg: u32, semitones: f32) u32 {
+    const upper: u32 = changePitchOne(@intCast(tone_arg >> 16), semitones);
+    const lower: u32 = changePitchOne(@intCast(tone_arg & 0xffff), semitones);
+    return upper << 16 | lower;
+}
 fn tickMultitones() void {
     var mt_index: usize = 0;
     while (mt_index < global.multitones_count) {
@@ -542,7 +557,9 @@ fn tickMultitones() void {
             const t = &mt.tones[mt.current_tone];
             if (t.frequency != 0) {
                 //log("playing tone freq {} dur {} vol {}", .{t.frequency, t.duration, t.volume});
-                w4.tone(t.frequency, t.duration, mt.volume, mt.flags);
+                var f = changePitch(t.frequency, 4);
+                //if (mt_index == 0) f = changePitch(t.frequency, -12);
+                w4.tone(f, t.duration, mt.volume, mt.flags);
             }
         }
         mt_index += 1;
