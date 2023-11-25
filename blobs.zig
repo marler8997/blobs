@@ -1,5 +1,7 @@
 const std = @import("std");
 const w4 = @import("wasm4.zig");
+const music = @import("music.zig");
+const Tone = music.Tone;
 
 const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
@@ -30,10 +32,6 @@ const Blob = struct {
     digesting: i32,
 };
 
-const Tone = struct {
-    frequency: u32,
-    duration: u32,
-};
 const MultiTone = struct {
     loop: bool,
     tones: []const Tone,
@@ -309,6 +307,23 @@ export fn start() void {
             0x25BEC1,
         };
     }
+    initStartMenu();
+}
+
+fn initStartMenu() void {
+    global.multitones_buf[0] = .{
+        .loop = false,
+        .tones = &music.bass,
+        .volume = 30,
+        .flags = w4.TONE_TRIANGLE,
+    };
+    global.multitones_buf[1] = .{
+        .loop = false,
+        .tones = &music.melody,
+        .volume = 20,
+        .flags = w4.TONE_PULSE1,
+    };
+    global.multitones_count = 2;
 }
 
 // used to tell if the "mode change button" is triggered.
@@ -348,6 +363,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     w4.text("BLOBS", 60, 40);
     w4.DRAW_COLORS.* = 0x04;
     w4.text("Press \x80 to start", 16, 76);
+    tickMultitones();
 
     if (!isModeChangeButtonTriggered(&start_menu.button1_released))
         return;
@@ -374,6 +390,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
         };
         global.ai_controls[i] = .none;
     }
+    global.multitones_count = 0;
     global.mode = .{ .play = .{
         .intro_frame = 0, // do show intro frame
     } };
@@ -398,6 +415,40 @@ fn textCenter(str: []const u8, y: i32) void {
     w4.text(str, @intCast((160 - str.len * 8) / 2), y);
 }
 
+fn tickMultitones() void {
+    var mt_index: usize = 0;
+    while (mt_index < global.multitones_count) {
+        const mt = &global.multitones_buf[mt_index];
+        mt.current_tone_frame += 1;
+        if (mt.current_tone_frame > mt.tones[mt.current_tone].duration) {
+            // TODO: handline looping multitones?
+            mt.current_tone += 1;
+            mt.current_tone_frame = 1;
+            if (mt.current_tone >= mt.tones.len) {
+                if (mt.loop) {
+                    mt.current_tone = 0;
+                } else {
+                    std.mem.copyForwards(
+                        MultiTone,
+                        global.multitones_buf[mt_index..global.multitones_count-1],
+                        global.multitones_buf[mt_index+1..global.multitones_count],
+                    );
+                    global.multitones_count -= 1;
+                    continue;
+                }
+            }
+        }
+        if (mt.current_tone_frame == 1) {
+            const t = &mt.tones[mt.current_tone];
+            if (t.frequency != 0) {
+                //log("playing tone freq {} dur {} vol {}", .{t.frequency, t.duration, t.volume});
+                w4.tone(t.frequency, t.duration, mt.volume, mt.flags);
+            }
+        }
+        mt_index += 1;
+    }
+}
+
 fn updatePlayMode(play: *Play) void {
     // check if the user wants to enter the settings
     if (isModeChangeButtonTriggered(&play.button1_released)) {
@@ -407,38 +458,7 @@ fn updatePlayMode(play: *Play) void {
         return;
     }
 
-    // update multitone sounds
-    {
-        var mt_index: usize = 0;
-        while (mt_index < global.multitones_count) {
-            const mt = &global.multitones_buf[mt_index];
-            mt.current_tone_frame += 1;
-            if (mt.current_tone_frame > mt.tones[mt.current_tone].duration) {
-                // TODO: handline looping multitones?
-                mt.current_tone += 1;
-                mt.current_tone_frame = 1;
-                if (mt.current_tone >= mt.tones.len) {
-                    if (mt.loop) {
-                        mt.current_tone = 0;
-                    } else {
-                        std.mem.copyForwards(
-                            MultiTone,
-                            global.multitones_buf[mt_index..global.multitones_count-1],
-                            global.multitones_buf[mt_index+1..global.multitones_count],
-                        );
-                        global.multitones_count -= 1;
-                        continue;
-                    }
-                }
-            }
-            if (mt.current_tone_frame == 1) {
-                const t = &mt.tones[mt.current_tone];
-                //log("playing tone freq {} dur {} vol {}", .{t.frequency, t.duration, t.volume});
-                w4.tone(t.frequency, t.duration, mt.volume, mt.flags);
-            }
-            mt_index += 1;
-        }
-    }
+    tickMultitones();
 
     if (global.my_eat_tone_frame) |*f| {
         f.* = f.* + 1;
