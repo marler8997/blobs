@@ -43,6 +43,9 @@ const MultiTone = struct {
     current_tone_frame: u32 = 0,
 };
 
+const StartMenu = struct {
+    button1_released: bool = false,
+};
 const Play = struct {
     button1_released: bool = false,
     intro_frame: ?u32,
@@ -54,10 +57,10 @@ const Settings = struct {
 const global = struct {
     pub var rand_seed: u8 = 0;
     pub var mode: union(enum) {
-        start_menu: void,
+        start_menu: StartMenu,
         play: Play,
         settings: Settings,
-    } = .start_menu;
+    } = .{ .start_menu = .{} };
     pub var rand: std.rand.DefaultPrng = undefined;
     pub var blobs: [60]Blob = undefined;
     pub const me = &blobs[0];
@@ -308,11 +311,28 @@ export fn start() void {
     }
 }
 
+// used to tell if the "mode change button" is triggered.
+// It requires a boolean state that tracks whether the
+// the button was ever in a released state.  This prevents the mode
+// from immediately changing multiple times when the button
+// is held down accross multiple frames.
+fn isModeChangeButtonTriggered(released_state_ref: *bool) bool {
+    const pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
+    if (!released_state_ref.*) {
+        if (!pressed) {
+            released_state_ref.* = true;
+        }
+        return false;
+    }
+    return pressed;
+}
+
 export fn update() void {
     switch (global.mode) {
-        .start_menu => updateStartMenu(),
-        // TODO: minify these 2 cases and file a bug, they cause the
+        // TODO: minify these cases and file a bug, they cause the
         //       compiler to crash on windows
+        //.start_menu => |*s| updateStartMenu(s),
+        .start_menu => updateStartMenu(&global.mode.start_menu),
         //.settings => |*s| updateSettingsMode(s),
         .settings => updateSettingsMode(&global.mode.settings),
         //.play => |*p| updatePlayMode(p),
@@ -320,7 +340,7 @@ export fn update() void {
     }
 }
 
-fn updateStartMenu() void {
+fn updateStartMenu(start_menu: *StartMenu) void {
     // TODO: play cool music
     global.rand_seed +%= 1;
     w4.DRAW_COLORS.* = 0x03;
@@ -329,7 +349,7 @@ fn updateStartMenu() void {
     w4.DRAW_COLORS.* = 0x04;
     w4.text("Press \x80 to start", 16, 76);
 
-    if (0 == (w4.GAMEPAD1.* & w4.BUTTON_1))
+    if (!isModeChangeButtonTriggered(&start_menu.button1_released))
         return;
 
     w4.tracef("random seed: %d", global.rand_seed);
@@ -360,20 +380,13 @@ fn updateStartMenu() void {
 }
 
 fn updateSettingsMode(settings: *Settings) void {
-    {
-        const button1_pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
-        if (!settings.button1_released) {
-            if (!button1_pressed) {
-                settings.button1_released = true;
-            }
-        } else if (button1_pressed) {
-            // NOTE: this will invalidate `settings` so we
-            //       return right after setting it
-            global.mode = .{ .play = .{
-                .intro_frame = null, // don't show intro frame
+    if (isModeChangeButtonTriggered(&settings.button1_released)) {
+        // NOTE: this will invalidate `settings` so we
+        //       return right after setting it
+        global.mode = .{ .play = .{
+            .intro_frame = null, // don't show intro frame
             } };
-            return;
-        }
+        return;
     }
 
     w4.DRAW_COLORS.* = 0x3;
@@ -387,18 +400,11 @@ fn textCenter(str: []const u8, y: i32) void {
 
 fn updatePlayMode(play: *Play) void {
     // check if the user wants to enter the settings
-    {
-        const button1_pressed = (0 != (w4.GAMEPAD1.* & w4.BUTTON_1));
-        if (!play.button1_released) {
-            if (!button1_pressed) {
-                play.button1_released = true;
-            }
-        } else if (button1_pressed) {
-            // NOTE: this will invalidate `play` so we
-            //       return right after setting it
-            global.mode = .{ .settings = .{} };
-            return;
-        }
+    if (isModeChangeButtonTriggered(&play.button1_released)) {
+        // NOTE: this will invalidate `play` so we
+        //       return right after setting it
+        global.mode = .{ .settings = .{} };
+        return;
     }
 
     // update multitone sounds
