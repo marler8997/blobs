@@ -364,7 +364,7 @@ fn initStartMenu() void {
     global.multitones_buf[0] = .{
         .loop = false,
         .tones = &music.bass,
-        .volume = 30,
+        .volume = 42,
         .flags = w4.TONE_TRIANGLE,
     };
     global.multitones_buf[1] = .{
