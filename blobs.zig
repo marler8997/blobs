@@ -73,6 +73,10 @@ const Settings = struct {
     } = .appearance,
 };
 
+const PlayerData = struct {
+    last_points_per_pixel: ?i32 = null,
+};
+
 const global = struct {
     var disk_state = [_]u8 { 0 } ** 1;
     pub var rand_seed: u8 = 0;
@@ -83,13 +87,24 @@ const global = struct {
     } = .{ .start_menu = .{} };
     pub var rand: std.rand.DefaultPrng = undefined;
     pub var blobs: [60]Blob = undefined;
-    pub const me = &blobs[0];
-    var ai_controls = [_]Control{ .none } ** (global.blobs.len - 1);
+    pub fn myBlob() *Blob {
+        return &blobs[w4.NETPLAY.* & 0x3];
+    }
+
+    var ai_controls = [_]Control{ .none } ** (global.blobs.len - 4);
     var multitones_buf: [20]MultiTone = undefined;
     var multitones_count: usize = 0;
     var my_eat_tone_frame: ?u8 = null;
-    var last_points_per_pixel: ?i32 = null;
+
+    var player_data = [4]PlayerData{
+        .{}, .{}, .{}, .{}
+    };
+    pub fn myPlayerData() *PlayerData {
+        return &player_data[w4.NETPLAY.* & 0x3];
+    }
 };
+
+fn netplay() bool { return 0 != (w4.NETPLAY.* & 4); }
 
 fn log(comptime fmt: []const u8, args: anytype) void {
     var buf: [300]u8 = undefined;
@@ -156,11 +171,11 @@ fn getRandomPoint() XY(i32) {
 
 fn ptToPxX(points_per_pixel: i32, coord_x: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_x - global.me.pos_pt.x), points_per_pixel);
+    return 80 + @divTrunc((coord_x - global.myBlob().pos_pt.x), points_per_pixel);
 }
 fn ptToPxY(points_per_pixel: i32, coord_y: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_y - global.me.pos_pt.y), points_per_pixel);
+    return 80 + @divTrunc((coord_y - global.myBlob().pos_pt.y), points_per_pixel);
 }
 fn ptToPx(points_per_pixel: i32, pt: XY(i32)) XY(i32) {
     return XY(i32){
@@ -254,8 +269,9 @@ const VolPan = struct {
     pan: u32,
 
     pub fn fromPoint(pt: XY(i32), max_volume: u32) VolPan {
-        const diff_x: f32 = @floatFromInt(pt.x - global.me.pos_pt.x);
-        const diff_y: f32 = @floatFromInt(pt.y - global.me.pos_pt.y);
+        const my_blob = global.myBlob();
+        const diff_x: f32 = @floatFromInt(pt.x - my_blob.pos_pt.x);
+        const diff_y: f32 = @floatFromInt(pt.y - my_blob.pos_pt.y);
         const dist = std.math.sqrt(diff_x * diff_x + diff_y * diff_y);
         if (dist < 0) @panic("codebug");
         const max_distance = arena_half_size_pt_f32 * 1.5;
@@ -285,7 +301,7 @@ fn eatBlobTone(eater: *const Blob) void {
         log("WARNING!!! can't play eatBlobTone, out of multitone slots!", .{});
         return;
     }
-    const vp: VolPan = if (eater == global.me) .{
+    const vp: VolPan = if (eater == global.myBlob()) .{
         .volume = max_eat_blob_volume,
         .pan = 0,
     } else VolPan.fromPoint(eater.pos_pt, max_eat_blob_volume);
@@ -301,7 +317,7 @@ fn eatBlobTone(eater: *const Blob) void {
 const eat_tone_duration = 5;
 fn eatTone(blob: *const Blob) void {
     // don't cut off the player's eat tone
-    const is_me = blob == global.me;
+    const is_me = (blob == global.myBlob());
     if (is_me) {
         global.my_eat_tone_frame = 1;
     } else if (global.my_eat_tone_frame) |_| {
@@ -456,23 +472,22 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     for (&points_buf) |*pt| {
         pt.* = getRandomPoint();
     }
-    global.me.* = .{
-        .pos_pt = .{ .x = 0, .y = 0 },
-        .mass = starting_mass,
-        .angle = 0,
-        .dashing = false,
-        .digesting = 0,
-    };
-    for (global.blobs[1..], 0..) |*other, i| {
-        other.* = .{
+    for (&global.blobs, 0..) |*blob, i| {
+        const is_potential_player = (i < 4);
+        const start_boost: i32 = if (is_potential_player) 0
+            else @as(i32, @intFromFloat(@floor(300 * getRandomScale(2))));
+        blob.* = .{
             .pos_pt = getRandomPoint(),
-            .mass = starting_mass + @as(i32, @intFromFloat(@floor(300 * getRandomScale(2)))),
-            .angle = _2pi * getRandomScale(2),
+            .mass = starting_mass + start_boost,
+            .angle = if (is_potential_player) 0 else _2pi * getRandomScale(2),
             .dashing = false,
             .digesting = 0,
         };
-        global.ai_controls[i] = .none;
     }
+    for (&global.ai_controls) |*c| {
+        c.* = .none;
+    }
+
     global.multitones_count = 0;
     global.mode = .{ .play = .{
         .intro_frame = 0, // do show intro frame
@@ -524,6 +539,28 @@ fn updateSettingsMode(settings: *Settings) void {
     w4.DRAW_COLORS.* = 0x3;
     w4.text("Dark", 28, 10);
     w4.text("Light", 76, 10);
+
+    w4.DRAW_COLORS.* = 0x3;
+    {
+        const netplay_x = 22;
+        const netplay_y = 80;
+        w4.text("NETPLAY: ", netplay_x, netplay_y);
+
+        var buf: [20]u8 = undefined;
+        const status = blk: {
+            if (netplay()) {
+                w4.DRAW_COLORS.* = 0x4;
+                break :blk std.fmt.bufPrint(
+                    &buf, "Player {}", .{1 + (w4.NETPLAY.* & 0x3)}
+                ) catch @panic("codebug");
+            }
+            w4.DRAW_COLORS.* = 0x2;
+            break :blk "off";
+        };
+        w4.text(status, netplay_x + 3 + 8*8, netplay_y);
+    }
+
+    w4.DRAW_COLORS.* = 0x3;
     textCenter("Return To Game \x80", 146);
 }
 
@@ -583,18 +620,18 @@ fn updatePlayMode(play: *Play) void {
         }
     }
 
-    updateAngle(global.me, getControl(
-        0 != (w4.GAMEPAD1.* & w4.BUTTON_LEFT),
-        0 != (w4.GAMEPAD1.* & w4.BUTTON_RIGHT),
-    ));
-
-    if (0 != (w4.GAMEPAD1.* & w4.BUTTON_2)) {
-        global.me.dashing = true;
-    } else {
-        global.me.dashing = false;
+    for (0 .. 4) |player_index| {
+        const gamepad = @as([*]const u8, @ptrFromInt(0x16))[player_index];
+        updateAngle(&global.blobs[player_index], getControl(
+            0 != (gamepad & w4.BUTTON_LEFT),
+            0 != (gamepad & w4.BUTTON_RIGHT),
+        ));
+        global.blobs[player_index].dashing = (
+            0 != (gamepad & w4.BUTTON_2)
+        );
     }
 
-    for (global.blobs[1..], 0..) |*blob, i| {
+    for (global.blobs[4..], 0..) |*blob, i| {
         if (blob.mass == 0) continue;
         const control_ref = &global.ai_controls[i];
         {
@@ -628,11 +665,11 @@ fn updatePlayMode(play: *Play) void {
         )) {
             .none => {},
             .dec => {
-                const mod = @max(1, @divTrunc(global.me.mass, 20));
+                const mod = @max(1, @divTrunc(global.p1.mass, 20));
                 global.me.mass = @max(starting_mass, global.me.mass - mod);
             },
             .inc => {
-                const mod = @max(1, @divTrunc(global.me.mass, 20));
+                const mod = @max(1, @divTrunc(global.p1.mass, 20));
                 global.me.mass += mod;
             },
         }
@@ -715,16 +752,17 @@ fn updatePlayMode(play: *Play) void {
         }
     }
 
+    const my_data = global.myPlayerData();
     const points_per_pixel: i32 = blk: {
-        if (global.me.mass == 0) {
-            if (global.last_points_per_pixel) |*ppp| {
+        const my_blob = global.myBlob();
+        if (my_blob.mass == 0) {
+            if (my_data.last_points_per_pixel) |*ppp| {
                 const zoom_speed = 10;
-
-                if (global.me.pos_pt.x != 0 or global.me.pos_pt.y != 0) {
+                if (my_blob.pos_pt.x != 0 or my_blob.pos_pt.y != 0) {
                     const zoom_left: f32 = @floatFromInt(@max(0, max_points_per_pixel - ppp.*));
                     const zoom_multipler: f32 = @as(f32, @min(zoom_left, zoom_speed)) / zoom_left;
-                    const from = global.me.pos_pt;
-                    global.me.pos_pt = .{
+                    const from = my_blob.pos_pt;
+                    my_blob.pos_pt = .{
                         .x = interpolateScale(i32, from.x, 0, zoom_multipler),
                         .y = interpolateScale(i32, from.y, 0, zoom_multipler),
                     };
@@ -733,7 +771,7 @@ fn updatePlayMode(play: *Play) void {
                 break :blk @min(max_points_per_pixel, ppp.* + zoom_speed);
             }
         }
-        const radius: i32 = if (global.me.mass == 0) min_radius_pt else radiuses[0];
+        const radius: i32 = if (my_blob.mass == 0) min_radius_pt else radiuses[0];
         const my_desired_blob_radius_px: i32 = interpolateScale(
             i32,
             10,
@@ -744,11 +782,11 @@ fn updatePlayMode(play: *Play) void {
             max_points_per_pixel,
             @divTrunc(radius, my_desired_blob_radius_px),
         );
-        if (global.last_points_per_pixel) |*ppp|
+        if (my_data.last_points_per_pixel) |*ppp|
             break :blk interpolateAdditive(i32, ppp.*, desired_ppp, 1);
         break :blk desired_ppp;
     };
-    global.last_points_per_pixel = points_per_pixel;
+    my_data.last_points_per_pixel = points_per_pixel;
     drawBars(points_per_pixel, .x);
     drawBars(points_per_pixel, .y);
 
@@ -847,6 +885,11 @@ fn updatePlayMode(play: *Play) void {
         ) catch @panic("codebug");
         w4.DRAW_COLORS.* = 0x04;
         w4.text(str, 0, 0);
+    }
+
+    if (global.myBlob().mass == 0) {
+        w4.DRAW_COLORS.* = 0x13;
+        textCenter("Spectating...", 150);
     }
 }
 
