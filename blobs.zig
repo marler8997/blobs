@@ -6,14 +6,24 @@ const Tone = music.Tone;
 
 const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
+const max_points_per_pixel: i32 = (arena_half_size_pt*2) / 160;
 
 const base_speed_pt: f32 = 90;
 const max_size_penalty = 80;
-const min_radius_pt = 500;
-const max_radius_pt = arena_half_size_pt;
-const radius_range_pt = max_radius_pt - min_radius_pt;
 
-const eat_nibble_size_inc = 10;
+// The starting mass is important to adjust strategy on how much
+// more valuable eating another blob is vs eating indiviual pixels/nibbles
+const starting_mass = 50;
+
+const min_radius_pt = 500;
+fn massToRadius(mass: i32) i32 {
+    if (mass == 0) @panic("codebug");
+    if (mass < starting_mass) std.debug.panic("codebug: mass {} too small", .{mass});
+    const part: f32 = @floatFromInt(mass - starting_mass);
+    const extra: i32 = @intFromFloat(@round(200 * std.math.sqrt(part)));
+    return min_radius_pt + extra;
+}
+
 const max_digest_per_frame = 10;
 
 const intro_messages = [_][]const u8 {
@@ -28,12 +38,11 @@ fn XY(comptime T: type) type {
 
 const Blob = struct {
     pos_pt: XY(i32),
-    radius_pt: i32,
+    mass: i32,
     // Angle is in radians in the range of [0,2PI) (includes 0 but not 2PI).
     // 0 is to the right, PI/2 is upward and so on.
     angle: f32,
     dashing: bool,
-    eaten: bool,
     digesting: i32,
 };
 
@@ -79,6 +88,7 @@ const global = struct {
     var multitones_buf: [20]MultiTone = undefined;
     var multitones_count: usize = 0;
     var my_eat_tone_frame: ?u8 = null;
+    var last_points_per_pixel: ?i32 = null;
 };
 
 fn log(comptime fmt: []const u8, args: anytype) void {
@@ -165,31 +175,39 @@ fn clamp(comptime T: type, val: T, min: T, max: T) T {
     return val;
 }
 
-fn closerToZero(val: i32, speed: i32) i32 {
+fn interpolateAdditive(comptime T: type, from: T, to: T, speed: T) T {
     if (speed <= 0) @panic("codebug");
-    if (val < 0) {
-        return if (-val <= speed) 0 else val + speed;
-    } else if (val > 0) {
-        return if (val <= speed) 0 else val - speed;
+    if (from < to) {
+        return @min(to, from + speed);
+    } else if (from > to) {
+        return @max(to, from - speed);
     }
-    return 0;
+    else return to;
 }
 
-fn getFreqs(radius: f32) struct { start: u16, end: u16 } {
-    //log("radius {}", .{@as(i32, @intFromFloat(@floor(radius)))});
-    if (radius <= min_radius_pt * 2) return .{
+fn interpolateScale(comptime T: type, from: T, to: T, scale: f32) T {
+    if (scale < 0) @panic("codebug: negative scale");
+    if (scale > 1) @panic("codebug: scale too big");
+    if (from == to) return to;
+    const diff = to - from;
+    return from + @as(T, @intFromFloat(scale * @as(f32, @floatFromInt(diff))));
+}
+
+fn getFreqs(mass: i32) struct { start: u16, end: u16 } {
+    //log("mass {}", .{mass});
+    if (mass <= 100) return .{
         .start = 2000,
         .end   = 5000,
     };
-    if (radius <= min_radius_pt * 4) return .{
+    if (mass <= 1000) return .{
         .start = 1000,
         .end   = 2000,
     };
-    if (radius <= min_radius_pt * 8) return .{
+    if (mass <= 10000) return .{
         .start = 400,
         .end   = 1000,
     };
-    if (radius <= min_radius_pt * 16) return .{
+    if (mass <= 5000) return .{
         .start = 100,
         .end   = 400,
     };
@@ -293,7 +311,7 @@ fn eatTone(blob: *const Blob) void {
         return;
     }
 
-    const freqs = getFreqs(@floatFromInt(blob.radius_pt));
+    const freqs = getFreqs(blob.mass);
     //log("tone {} to {}", .{freqs.start, freqs.send});
     const freq_arg = @as(u32, freqs.end) << 16 | freqs.start;
     const vp: VolPan = if (is_me) .{
@@ -440,19 +458,17 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     }
     global.me.* = .{
         .pos_pt = .{ .x = 0, .y = 0 },
-        .radius_pt = min_radius_pt,
+        .mass = starting_mass,
         .angle = 0,
         .dashing = false,
-        .eaten = false,
         .digesting = 0,
     };
     for (global.blobs[1..], 0..) |*other, i| {
         other.* = .{
             .pos_pt = getRandomPoint(),
-            .radius_pt = min_radius_pt,
+            .mass = starting_mass + @as(i32, @intFromFloat(@floor(300 * getRandomScale(2)))),
             .angle = _2pi * getRandomScale(2),
             .dashing = false,
-            .eaten = false,
             .digesting = 0,
         };
         global.ai_controls[i] = .none;
@@ -579,7 +595,7 @@ fn updatePlayMode(play: *Play) void {
     }
 
     for (global.blobs[1..], 0..) |*blob, i| {
-        if (blob.eaten) continue;
+        if (blob.mass == 0) continue;
         const control_ref = &global.ai_controls[i];
         {
             var buf: [1]u8 = undefined;
@@ -603,20 +619,6 @@ fn updatePlayMode(play: *Play) void {
         updateAngle(blob, control_ref.*);
     }
 
-    // if we're dead...slowly zoom out...lol!
-    // TODO: show a "YOU DIED" on the screen
-    if (global.me.eaten) {
-        if (global.me.radius_pt < arena_half_size_pt * 1 / 8) {
-            global.me.radius_pt += 20;
-        }
-        if (global.me.pos_pt.x != 0 or global.me.pos_pt.y != 0) {
-            global.me.pos_pt = .{
-                .x = closerToZero(global.me.pos_pt.x, 100),
-                .y = closerToZero(global.me.pos_pt.y, 100),
-            };
-        }
-    }
-
     // custom size change control (for development)
     const cheat = false;
     if (cheat) {
@@ -625,10 +627,14 @@ fn updatePlayMode(play: *Play) void {
             0 != (w4.GAMEPAD1.* & w4.BUTTON_UP),
         )) {
             .none => {},
-            .dec => global.me.radius_pt = @max(
-                global.me.radius_pt - 10, 10
-            ),
-            .inc => global.me.radius_pt += 10,
+            .dec => {
+                const mod = @max(1, @divTrunc(global.me.mass, 20));
+                global.me.mass = @max(starting_mass, global.me.mass - mod);
+            },
+            .inc => {
+                const mod = @max(1, @divTrunc(global.me.mass, 20));
+                global.me.mass += mod;
+            },
         }
     }
 
@@ -636,31 +642,34 @@ fn updatePlayMode(play: *Play) void {
     for (&global.blobs) |*blob| {
         if (blob.digesting != 0) {
             const digest = @min(max_digest_per_frame, blob.digesting);
-            blob.radius_pt += digest;
+            blob.mass += digest;
             blob.digesting -= digest;
         }
     }
 
     var sines: [global.blobs.len]f32 = undefined;
     var cosines: [global.blobs.len]f32 = undefined;
+    var radiuses: [global.blobs.len]i32 = undefined;
 
     // move blobs
     for (&global.blobs, 0..) |*blob, i| {
-        if (blob.eaten) continue;
+        if (blob.mass == 0) continue;
+
         // TODO: get slower as you get bigger
         sines[i] = std.math.sin(blob.angle);
         cosines[i] = std.math.cos(blob.angle);
+        radiuses[i] = massToRadius(blob.mass);
 
-        const penalty_multipler: f32 = @as(
-            f32, @max(0, @as(f32, @floatFromInt(blob.radius_pt - min_radius_pt)))
-        ) / @as(f32, radius_range_pt);
+        const penalty_multipler: f32 = @min(1.0, @as(
+            f32, @max(0, @as(f32, @floatFromInt(blob.mass)))
+        ) / @as(f32, 10000));
         const penalty: f32 = penalty_multipler * @as(f32, max_size_penalty);
         var speed_pt = (if (blob.dashing) base_speed_pt * 2 else base_speed_pt) - penalty;
 
         const diff_x: i32 = @intFromFloat(@floor(speed_pt * cosines[i]));
         const diff_y: i32 = @intFromFloat(@floor(speed_pt * sines[i]));
-        const min: i32 = -arena_half_size_pt + blob.radius_pt;
-        const max: i32 =  arena_half_size_pt - blob.radius_pt;
+        const min: i32 = -arena_half_size_pt + radiuses[i];
+        const max: i32 =  arena_half_size_pt - radiuses[i];
         blob.pos_pt = .{
             .x = clamp(i32, blob.pos_pt.x + diff_x, min, max),
             .y = clamp(i32, blob.pos_pt.y + diff_y, min, max),
@@ -668,47 +677,78 @@ fn updatePlayMode(play: *Play) void {
     }
 
     // TODO: this *might* need some optimization?
-    for (&global.blobs, 0..) |*blob, i| {
-        if (blob.eaten) continue;
-        for (global.blobs[i+1..]) |*other_blob| {
-            if (other_blob.eaten) continue;
+    for (&global.blobs, 0..) |*blob, blob_index| {
+        if (blob.mass == 0) continue;
+        for (global.blobs[blob_index+1..], blob_index+1..) |*other_blob, other_blob_index| {
+            if (other_blob.mass == 0) continue;
             const dist: i32 = @intFromFloat(@floor(calcDistance(blob.pos_pt, other_blob.pos_pt)));
-            if (dist > blob.radius_pt and dist > other_blob.radius_pt)
+            if (dist > radiuses[blob_index] and dist > radiuses[other_blob_index])
                 continue;
 
             const blobs: struct {
                 eater: *Blob,
                 eaten: *Blob,
-            } = if (blob.radius_pt > other_blob.radius_pt)
+            } = if (radiuses[blob_index] > radiuses[other_blob_index])
                 .{ .eater = blob, .eaten = other_blob }
-            else if (other_blob.radius_pt > blob.radius_pt)
+            else if (radiuses[other_blob_index] > radiuses[blob_index])
                 .{ .eater = other_blob, .eaten = blob }
             else continue;
             eatBlobTone(blobs.eater);
-            blobs.eater.digesting += blobs.eaten.radius_pt;
-            blobs.eaten.eaten = true;
+            blobs.eater.digesting += blobs.eaten.mass;
+            blobs.eaten.mass = 0;
         }
     }
-    for (&global.blobs) |*blob| {
-        if (blob.eaten) continue;
+
+    // eat nibbles
+    for (&global.blobs, 0..) |*blob, blob_index| {
+        if (blob.mass == 0) continue;
         for (&points_buf) |*pt| {
             const dist = calcDistance(pt.*, blob.pos_pt);
-            if (dist >= @as(f32, @floatFromInt(blob.radius_pt))) continue;
+            if (dist >= @as(f32, @floatFromInt(radiuses[blob_index]))) continue;
 
             //log("eat point {}!", .{i});
             eatTone(blob);
-            {
-                pt.* = getRandomPoint();
-                blob.radius_pt += eat_nibble_size_inc;
-            }
+            blob.mass += 1;
+
+            // replace with new random nibble
+            pt.* = getRandomPoint();
         }
     }
 
-    const desired_blob_radius_px = 10;
-    const points_per_pixel: i32 = @divTrunc(
-        global.me.radius_pt,
-        desired_blob_radius_px
-    );
+    const points_per_pixel: i32 = blk: {
+        if (global.me.mass == 0) {
+            if (global.last_points_per_pixel) |*ppp| {
+                const zoom_speed = 10;
+
+                if (global.me.pos_pt.x != 0 or global.me.pos_pt.y != 0) {
+                    const zoom_left: f32 = @floatFromInt(@max(0, max_points_per_pixel - ppp.*));
+                    const zoom_multipler: f32 = @as(f32, @min(zoom_left, zoom_speed)) / zoom_left;
+                    const from = global.me.pos_pt;
+                    global.me.pos_pt = .{
+                        .x = interpolateScale(i32, from.x, 0, zoom_multipler),
+                        .y = interpolateScale(i32, from.y, 0, zoom_multipler),
+                    };
+                }
+
+                break :blk @min(max_points_per_pixel, ppp.* + zoom_speed);
+            }
+        }
+        const radius: i32 = if (global.me.mass == 0) min_radius_pt else radiuses[0];
+        const my_desired_blob_radius_px: i32 = interpolateScale(
+            i32,
+            10,
+            80,
+            @min(1, @as(f32, @floatFromInt(radius - min_radius_pt)) / arena_half_size_pt_f32),
+        );
+        const desired_ppp: i32 = @min(
+            max_points_per_pixel,
+            @divTrunc(radius, my_desired_blob_radius_px),
+        );
+        if (global.last_points_per_pixel) |*ppp|
+            break :blk interpolateAdditive(i32, ppp.*, desired_ppp, 1);
+        break :blk desired_ppp;
+    };
+    global.last_points_per_pixel = points_per_pixel;
     drawBars(points_per_pixel, .x);
     drawBars(points_per_pixel, .y);
 
@@ -720,33 +760,44 @@ fn updatePlayMode(play: *Play) void {
     }
 
     // draw the blobs
-    for (&global.blobs) |*blob| {
-        if (blob.eaten) continue;
-        {
-            const px = ptToPx(points_per_pixel, .{
-                .x = blob.pos_pt.x - blob.radius_pt,
-                .y = blob.pos_pt.y - blob.radius_pt,
-            });
-            w4.DRAW_COLORS.* = 0x33;
-            const size: i32 = @divTrunc(blob.radius_pt * 2, points_per_pixel);
-            //log("player {},{} size={}", .{px.x, px.y, size});
-            w4.oval(px.x, px.y, @intCast(size), @intCast(size));
-        }
+    for (&global.blobs, 0..) |*blob, blob_index| {
+        if (blob.mass == 0) continue;
+        const px = ptToPx(points_per_pixel, .{
+            .x = blob.pos_pt.x - radiuses[blob_index],
+            .y = blob.pos_pt.y - radiuses[blob_index],
+        });
+        w4.DRAW_COLORS.* = 0x33;
+        const size: i32 = @divTrunc(radiuses[blob_index] * 2, points_per_pixel);
+        //log("player {},{} size={}", .{px.x, px.y, size});
+        w4.oval(px.x, px.y, @intCast(size), @intCast(size));
     }
     // draw the blob directional dots (on second pass
     // so they always appear in front of the bodies)
     for (&global.blobs, 0..) |*blob, i| {
-        if (blob.eaten) continue;
-        {
-            const radius_pt: f32 = @as(f32, @floatFromInt(blob.radius_pt));
-            const px = ptToPx(points_per_pixel, .{
-                .x = blob.pos_pt.x + @as(i32, @intFromFloat(radius_pt * cosines[i])),
-                .y = blob.pos_pt.y + @as(i32, @intFromFloat(radius_pt * sines[i])),
-            });
-            w4.DRAW_COLORS.* = 0x43;
-            w4.oval(px.x - 2, px.y - 2, 4, 4);
+        if (blob.mass == 0) continue;
+        const radius_pt: f32 = @as(f32, @floatFromInt(radiuses[i]));
+        const px = ptToPx(points_per_pixel, .{
+            .x = blob.pos_pt.x + @as(i32, @intFromFloat(radius_pt * cosines[i])),
+            .y = blob.pos_pt.y + @as(i32, @intFromFloat(radius_pt * sines[i])),
+        });
+        w4.DRAW_COLORS.* = 0x43;
+        w4.oval(px.x - 2, px.y - 2, 4, 4);
+    }
+
+    const draw_mass = false;
+    if (draw_mass) {
+        for (&global.blobs) |*blob| {
+            if (blob.mass == 0) continue;
+            const px = ptToPx(points_per_pixel, blob.pos_pt);
+            w4.DRAW_COLORS.* = 0x33;
+            var buf: [100]u8 = undefined;
+            const str = std.fmt.bufPrint(&buf, "{}", .{blob.mass}) catch @panic("codebug");
+            w4.DRAW_COLORS.* = 0x02;
+            const shift_x: i32 = 4 * @as(i32, @intCast(str.len));
+            w4.text(str, px.x - shift_x, px.y - 4);
         }
     }
+
     // draw arena border
     {
         const top_left = ptToPx(points_per_pixel, .{
