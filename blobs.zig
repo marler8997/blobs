@@ -169,18 +169,18 @@ fn getRandomPoint() XY(i32) {
     };
 }
 
-fn ptToPxX(points_per_pixel: i32, coord_x: i32) i32 {
+fn ptToPxX(points_per_pixel: i32, center_pt: i32, pt: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_x - global.myBlob().pos_pt.x), points_per_pixel);
+    return 80 + @divTrunc(pt - center_pt, points_per_pixel);
 }
-fn ptToPxY(points_per_pixel: i32, coord_y: i32) i32 {
+fn ptToPxY(points_per_pixel: i32, center_pt: i32, pt: i32) i32 {
     if (points_per_pixel <= 0) unreachable;
-    return 80 + @divTrunc((coord_y - global.myBlob().pos_pt.y), points_per_pixel);
+    return 80 + @divTrunc(pt - center_pt, points_per_pixel);
 }
-fn ptToPx(points_per_pixel: i32, pt: XY(i32)) XY(i32) {
+fn ptToPx(points_per_pixel: i32, center_pt: XY(i32), pt: XY(i32)) XY(i32) {
     return XY(i32){
-        .x = ptToPxX(points_per_pixel, pt.x),
-        .y = ptToPxY(points_per_pixel, pt.y),
+        .x = ptToPxX(points_per_pixel, center_pt.x, pt.x),
+        .y = ptToPxY(points_per_pixel, center_pt.y, pt.y),
     };
 }
 
@@ -787,9 +787,9 @@ fn updatePlayMode(play: *Play) void {
         }
     }
 
+    const my_blob = global.myBlob();
     const my_player = play.myPlayer();
     const points_per_pixel: i32 = blk: {
-        const my_blob = global.myBlob();
         if (my_blob.mass == 0) {
             if (my_player.last_points_per_pixel) |*ppp| {
                 const zoom_speed = 10;
@@ -826,12 +826,12 @@ fn updatePlayMode(play: *Play) void {
         break :blk desired_ppp;
     };
     my_player.last_points_per_pixel = points_per_pixel;
-    drawBars(points_per_pixel, .x);
-    drawBars(points_per_pixel, .y);
+    drawBars(points_per_pixel, my_blob.pos_pt.x, .x);
+    drawBars(points_per_pixel, my_blob.pos_pt.y, .y);
 
     // draw dots
     for (&points_buf) |*pt| {
-        const px = ptToPx(points_per_pixel, pt.*);
+        const px = ptToPx(points_per_pixel, my_blob.pos_pt, pt.*);
         w4.DRAW_COLORS.* = 0x4;
         w4.rect(px.x, px.y, 1, 1);
     }
@@ -839,7 +839,7 @@ fn updatePlayMode(play: *Play) void {
     // draw the blobs
     for (&global.blobs, 0..) |*blob, blob_index| {
         if (blob.mass == 0) continue;
-        const px = ptToPx(points_per_pixel, .{
+        const px = ptToPx(points_per_pixel, my_blob.pos_pt, .{
             .x = blob.pos_pt.x - radiuses[blob_index],
             .y = blob.pos_pt.y - radiuses[blob_index],
         });
@@ -853,7 +853,7 @@ fn updatePlayMode(play: *Play) void {
     for (&global.blobs, 0..) |*blob, i| {
         if (blob.mass == 0) continue;
         const radius_pt: f32 = @as(f32, @floatFromInt(radiuses[i]));
-        const px = ptToPx(points_per_pixel, .{
+        const px = ptToPx(points_per_pixel, my_blob.pos_pt, .{
             .x = blob.pos_pt.x + @as(i32, @intFromFloat(radius_pt * cosines[i])),
             .y = blob.pos_pt.y + @as(i32, @intFromFloat(radius_pt * sines[i])),
         });
@@ -877,11 +877,11 @@ fn updatePlayMode(play: *Play) void {
 
     // draw arena border
     {
-        const top_left = ptToPx(points_per_pixel, .{
+        const top_left = ptToPx(points_per_pixel, my_blob.pos_pt, .{
             .x = -arena_half_size_pt,
             .y = -arena_half_size_pt,
         });
-        const bottom_right = ptToPx(points_per_pixel, .{
+        const bottom_right = ptToPx(points_per_pixel, my_blob.pos_pt, .{
             .x = arena_half_size_pt,
             .y = arena_half_size_pt,
         });
@@ -930,7 +930,7 @@ fn updatePlayMode(play: *Play) void {
     }
 }
 
-fn drawBars(points_per_pixel: i32, dir: enum { x, y}) void {
+fn drawBars(points_per_pixel: i32, center_pt: i32, dir: enum { x, y}) void {
     w4.DRAW_COLORS.* = 0x02;
     const grid_size_pt = 8000;
     var i_pt: i32 = -arena_half_size_pt;
@@ -938,8 +938,8 @@ fn drawBars(points_per_pixel: i32, dir: enum { x, y}) void {
         i_pt += grid_size_pt;
         if (i_pt >= arena_half_size_pt) break;
         const i_px = switch (dir) {
-            .x => ptToPxX(points_per_pixel, i_pt),
-            .y => ptToPxY(points_per_pixel, i_pt),
+            .x => ptToPxX(points_per_pixel, center_pt, i_pt),
+            .y => ptToPxY(points_per_pixel, center_pt, i_pt),
         };
         switch (dir) {
             .x => w4.vline(i_px, 0, 160),
