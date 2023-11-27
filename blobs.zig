@@ -826,12 +826,31 @@ fn updatePlayMode(play: *Play) void {
         break :blk desired_ppp;
     };
     my_player.last_points_per_pixel = points_per_pixel;
-    drawBars(points_per_pixel, my_blob.pos_pt.x, .x);
-    drawBars(points_per_pixel, my_blob.pos_pt.y, .y);
+    // keep the camera in the arena
+    const camera_center_pt: XY(i32) = blk: {
+        const half_view_size_pt = 80 * points_per_pixel;
+        break :blk XY(i32) {
+            .x = clamp(
+                i32,
+                my_blob.pos_pt.x,
+                -arena_half_size_pt + half_view_size_pt,
+                arena_half_size_pt - half_view_size_pt,
+            ),
+            .y = clamp(
+                i32,
+                my_blob.pos_pt.y,
+                -arena_half_size_pt + half_view_size_pt,
+                arena_half_size_pt - half_view_size_pt,
+            ),
+        };
+    };
+
+    drawBars(points_per_pixel, camera_center_pt.x, .x);
+    drawBars(points_per_pixel, camera_center_pt.y, .y);
 
     // draw dots
     for (&points_buf) |*pt| {
-        const px = ptToPx(points_per_pixel, my_blob.pos_pt, pt.*);
+        const px = ptToPx(points_per_pixel, camera_center_pt, pt.*);
         w4.DRAW_COLORS.* = 0x4;
         w4.rect(px.x, px.y, 1, 1);
     }
@@ -839,7 +858,7 @@ fn updatePlayMode(play: *Play) void {
     // draw the blobs
     for (&global.blobs, 0..) |*blob, blob_index| {
         if (blob.mass == 0) continue;
-        const px = ptToPx(points_per_pixel, my_blob.pos_pt, .{
+        const px = ptToPx(points_per_pixel, camera_center_pt, .{
             .x = blob.pos_pt.x - radiuses[blob_index],
             .y = blob.pos_pt.y - radiuses[blob_index],
         });
@@ -853,7 +872,7 @@ fn updatePlayMode(play: *Play) void {
     for (&global.blobs, 0..) |*blob, i| {
         if (blob.mass == 0) continue;
         const radius_pt: f32 = @as(f32, @floatFromInt(radiuses[i]));
-        const px = ptToPx(points_per_pixel, my_blob.pos_pt, .{
+        const px = ptToPx(points_per_pixel, camera_center_pt, .{
             .x = blob.pos_pt.x + @as(i32, @intFromFloat(radius_pt * cosines[i])),
             .y = blob.pos_pt.y + @as(i32, @intFromFloat(radius_pt * sines[i])),
         });
@@ -877,11 +896,11 @@ fn updatePlayMode(play: *Play) void {
 
     // draw arena border
     {
-        const top_left = ptToPx(points_per_pixel, my_blob.pos_pt, .{
+        const top_left = ptToPx(points_per_pixel, camera_center_pt, .{
             .x = -arena_half_size_pt,
             .y = -arena_half_size_pt,
         });
-        const bottom_right = ptToPx(points_per_pixel, my_blob.pos_pt, .{
+        const bottom_right = ptToPx(points_per_pixel, camera_center_pt, .{
             .x = arena_half_size_pt,
             .y = arena_half_size_pt,
         });
