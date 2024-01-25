@@ -2,6 +2,8 @@
 
 A game written in Zig for the [WASM-4](https://wasm4.org) fantasy console.
 
+Try it at http://marler.info/blobs.html
+
 ## Building
 
 Build the cart by running:
