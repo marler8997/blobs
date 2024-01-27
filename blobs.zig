@@ -137,7 +137,7 @@ pub fn getControl(dec: bool, inc: bool) Control {
 }
 
 const angle_speed: f32 = @as(f32, std.math.pi) / @as(f32, 40);
-const _2pi = 2 * std.math.pi;
+const tau = std.math.tau;
 
 var points_buf: [5000]XY(i32) = undefined;
 
@@ -238,15 +238,15 @@ fn updateAngle(blob: *Blob, control: Control) void {
         .dec => {
             blob.angle -= angle_speed;
             if (blob.angle < 0) {
-                blob.angle += _2pi;
+                blob.angle += tau;
                 std.debug.assert(blob.angle >= 0);
             }
         },
         .inc => {
             blob.angle += angle_speed;
-            if (blob.angle > _2pi) {
-                blob.angle -= _2pi;
-                std.debug.assert(blob.angle <= _2pi);
+            if (blob.angle > tau) {
+                blob.angle -= tau;
+                std.debug.assert(blob.angle <= tau);
             }
         },
     }
@@ -479,7 +479,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
         blob.* = .{
             .pos_pt = getRandomPoint(),
             .mass = starting_mass + start_boost,
-            .angle = if (is_potential_player) 0 else _2pi * getRandomScale(2),
+            .angle = if (is_potential_player) 0 else tau * getRandomScale(2),
             .dashing = false,
             .digesting = 0,
         };
