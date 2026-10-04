@@ -6,7 +6,7 @@ const Tone = music.Tone;
 
 const arena_half_size_pt: i32 = 100000;
 const arena_half_size_pt_f32: f32 = @floatFromInt(arena_half_size_pt);
-const max_points_per_pixel: i32 = (arena_half_size_pt*2) / 160;
+const max_points_per_pixel: i32 = (arena_half_size_pt * 2) / 160;
 
 const base_speed_pt: f32 = 90;
 const max_size_penalty = 80;
@@ -26,7 +26,7 @@ fn massToRadius(mass: i32) i32 {
 
 const max_digest_per_frame = 10;
 
-const intro_messages = [_][]const u8 {
+const intro_messages = [_][]const u8{
     "Be Fruitful and\nBlob!",
     "Take off\nevery Blob!",
     "All your Blob are\nbelong to us!",
@@ -61,7 +61,7 @@ const StartMenu = struct {
 const Play = struct {
     button1_released: bool = false,
     intro_frame: ?u32,
-    player: [4]Player = .{.{}, .{}, .{}, .{} },
+    player: [4]Player = .{ .{}, .{}, .{}, .{} },
 
     pub fn myPlayer(self: *Play) *Player {
         return &self.player[w4.NETPLAY.* & 0x3];
@@ -84,7 +84,7 @@ const Settings = struct {
 };
 
 const global = struct {
-    var disk_state = [_]u8 { 0 } ** 1;
+    var disk_state = [_]u8{0} ** 1;
     pub var rand_seed: u8 = 0;
     pub var mode: union(enum) {
         start_menu: StartMenu,
@@ -97,14 +97,15 @@ const global = struct {
         return &blobs[w4.NETPLAY.* & 0x3];
     }
 
-    var ai_controls = [_]Control{ .none } ** (global.blobs.len - 4);
+    var ai_controls = [_]Control{.none} ** (global.blobs.len - 4);
     var multitones_buf: [20]MultiTone = undefined;
     var multitones_count: usize = 0;
     var my_eat_tone_frame: ?u8 = null;
-
 };
 
-fn netplay() bool { return 0 != (w4.NETPLAY.* & 4); }
+fn netplay() bool {
+    return 0 != (w4.NETPLAY.* & 4);
+}
 
 fn log(comptime fmt: []const u8, args: anytype) void {
     var buf: [300]u8 = undefined;
@@ -127,7 +128,9 @@ pub fn panic(
     w4.trace("dumping current stack...");
     std.debug.dumpCurrentStackTrace(ret_addr);
     w4.trace("breakpoint");
-    while (true) { @breakpoint(); }
+    while (true) {
+        @breakpoint();
+    }
 }
 
 const Control = enum { none, dec, inc };
@@ -196,8 +199,7 @@ fn interpolateAdditive(comptime T: type, from: T, to: T, speed: T) T {
         return @min(to, from + speed);
     } else if (from > to) {
         return @max(to, from - speed);
-    }
-    else return to;
+    } else return to;
 }
 
 fn interpolateScale(comptime T: type, from: T, to: T, scale: f32) T {
@@ -212,23 +214,23 @@ fn getFreqs(mass: i32) struct { start: u16, end: u16 } {
     //log("mass {}", .{mass});
     if (mass <= 100) return .{
         .start = 2000,
-        .end   = 5000,
+        .end = 5000,
     };
     if (mass <= 1000) return .{
         .start = 1000,
-        .end   = 2000,
+        .end = 2000,
     };
     if (mass <= 10000) return .{
         .start = 400,
-        .end   = 1000,
+        .end = 1000,
     };
     if (mass <= 5000) return .{
         .start = 100,
-        .end   = 400,
+        .end = 400,
     };
     return .{
         .start = 50,
-        .end   = 100,
+        .end = 100,
     };
 }
 
@@ -277,15 +279,7 @@ const VolPan = struct {
         const max_distance = arena_half_size_pt_f32 * 1.5;
         const ratio: f32 = 1.0 - @min(dist, max_distance) / max_distance;
         const pan_threshold = arena_half_size_pt_f32 / 3;
-        return .{
-            .volume = @intFromFloat((ratio*ratio) * (
-                @as(f32, @floatFromInt(max_volume)) * global_volume
-            )),
-            .pan =
-                if (diff_x > pan_threshold) w4.TONE_PAN_RIGHT
-                else if (diff_x < -pan_threshold) w4.TONE_PAN_LEFT
-                else 0
-        };
+        return .{ .volume = @intFromFloat((ratio * ratio) * (@as(f32, @floatFromInt(max_volume)) * global_volume)), .pan = if (diff_x > pan_threshold) w4.TONE_PAN_RIGHT else if (diff_x < -pan_threshold) w4.TONE_PAN_LEFT else 0 };
     }
 };
 
@@ -378,7 +372,10 @@ fn applyAppearance() void {
 fn changeAppearance(a: Appearance) void {
     setDiskState(
         disk_state_flag.light_mode,
-        switch (a) { .dark => 0, .light => 1 },
+        switch (a) {
+            .dark => 0,
+            .light => 1,
+        },
     );
     applyAppearance();
 }
@@ -447,8 +444,9 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     w4.DRAW_COLORS.* = 0x0430;
     w4.blit(
         &startlogo.blobs,
-        (160 - startlogo.blobs_width) / 2, 10,
-         startlogo.blobs_width,
+        (160 - startlogo.blobs_width) / 2,
+        10,
+        startlogo.blobs_width,
         startlogo.blobs_height,
         w4.BLIT_2BPP,
     );
@@ -462,9 +460,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     textCenter("Press \x80 to start", 130);
     tickMultitones();
 
-    if (!isButtonTriggered(
-        w4.BUTTON_1, &start_menu.button1_released
-    ))
+    if (!isButtonTriggered(w4.BUTTON_1, &start_menu.button1_released))
         return;
 
     w4.tracef("random seed: %d", global.rand_seed);
@@ -474,8 +470,7 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     }
     for (&global.blobs, 0..) |*blob, i| {
         const is_potential_player = (i < 4);
-        const start_boost: i32 = if (is_potential_player) 0
-            else @as(i32, @intFromFloat(@floor(300 * getRandomScale(2))));
+        const start_boost: i32 = if (is_potential_player) 0 else @as(i32, @intFromFloat(@floor(300 * getRandomScale(2))));
         blob.* = .{
             .pos_pt = getRandomPoint(),
             .mass = starting_mass + start_boost,
@@ -489,21 +484,23 @@ fn updateStartMenu(start_menu: *StartMenu) void {
     }
 
     global.multitones_count = 0;
-    global.mode = .{ .play = .{
-        .intro_frame = 0, // do show intro frame
-    } };
+    global.mode = .{
+        .play = .{
+            .intro_frame = 0, // do show intro frame
+        },
+    };
 }
 
 fn updateSettingsMode(settings: *Settings) void {
-    if (isButtonTriggered(
-        w4.BUTTON_1, &settings.button1_released
-    )) switch (settings.selection) {
+    if (isButtonTriggered(w4.BUTTON_1, &settings.button1_released)) switch (settings.selection) {
         .return_to_game => {
             // NOTE: this will invalidate `settings` so we
             //       return right after setting it
-            global.mode = .{ .play = .{
-                .intro_frame = null, // don't show intro frame
-            } };
+            global.mode = .{
+                .play = .{
+                    .intro_frame = null, // don't show intro frame
+                },
+            };
             return;
         },
         .appearance => changeAppearance(switch (getAppearance()) {
@@ -513,35 +510,27 @@ fn updateSettingsMode(settings: *Settings) void {
         .new_game => {
             // NOTE: this will invalidate `settings` so we
             //       return right after setting it
-            global.mode = .{ .start_menu = .{ } };
+            global.mode = .{ .start_menu = .{} };
             initStartMenuMusic();
             return;
         },
     };
-    if (isButtonTriggered(
-        w4.BUTTON_UP, &settings.button_up_released
-    )) switch (settings.selection) {
+    if (isButtonTriggered(w4.BUTTON_UP, &settings.button_up_released)) switch (settings.selection) {
         .return_to_game => {},
         .appearance => settings.selection = .return_to_game,
         .new_game => settings.selection = .appearance,
     };
-    if (isButtonTriggered(
-        w4.BUTTON_DOWN, &settings.button_down_released
-    )) switch (settings.selection) {
+    if (isButtonTriggered(w4.BUTTON_DOWN, &settings.button_down_released)) switch (settings.selection) {
         .return_to_game => settings.selection = .appearance,
         .appearance => settings.selection = .new_game,
         .new_game => {},
     };
-    if (isButtonTriggered(
-        w4.BUTTON_RIGHT, &settings.button_right_released
-    )) switch (settings.selection) {
+    if (isButtonTriggered(w4.BUTTON_RIGHT, &settings.button_right_released)) switch (settings.selection) {
         .return_to_game => {},
         .appearance => changeAppearance(.light),
         .new_game => {},
     };
-    if (isButtonTriggered(
-        w4.BUTTON_LEFT, &settings.button_left_released
-    )) switch (settings.selection) {
+    if (isButtonTriggered(w4.BUTTON_LEFT, &settings.button_left_released)) switch (settings.selection) {
         .return_to_game => {},
         .appearance => changeAppearance(.dark),
         .new_game => {},
@@ -557,14 +546,12 @@ fn updateSettingsMode(settings: *Settings) void {
         const status = blk: {
             if (netplay()) {
                 w4.DRAW_COLORS.* = 0x4;
-                break :blk std.fmt.bufPrint(
-                    &buf, "Player {}", .{1 + (w4.NETPLAY.* & 0x3)}
-                ) catch @panic("codebug");
+                break :blk std.fmt.bufPrint(&buf, "Player {}", .{1 + (w4.NETPLAY.* & 0x3)}) catch @panic("codebug");
             }
             w4.DRAW_COLORS.* = 0x2;
             break :blk "off";
         };
-        w4.text(status, netplay_x + 3 + 8*8, netplay_y);
+        w4.text(status, netplay_x + 3 + 8 * 8, netplay_y);
     }
 
     const return_y = 50;
@@ -616,8 +603,8 @@ fn tickMultitones() void {
                 } else {
                     std.mem.copyForwards(
                         MultiTone,
-                        global.multitones_buf[mt_index..global.multitones_count-1],
-                        global.multitones_buf[mt_index+1..global.multitones_count],
+                        global.multitones_buf[mt_index .. global.multitones_count - 1],
+                        global.multitones_buf[mt_index + 1 .. global.multitones_count],
                     );
                     global.multitones_count -= 1;
                     continue;
@@ -653,15 +640,13 @@ fn updatePlayMode(play: *Play) void {
         }
     }
 
-    for (0 .. 4) |player_index| {
+    for (0..4) |player_index| {
         const gamepad = @as([*]const u8, @ptrFromInt(0x16))[player_index];
         updateAngle(&global.blobs[player_index], getControl(
             0 != (gamepad & w4.BUTTON_LEFT),
             0 != (gamepad & w4.BUTTON_RIGHT),
         ));
-        global.blobs[player_index].dashing = (
-            0 != (gamepad & w4.BUTTON_2)
-        );
+        global.blobs[player_index].dashing = (0 != (gamepad & w4.BUTTON_2));
     }
 
     for (global.blobs[4..], 0..) |*blob, i| {
@@ -731,16 +716,14 @@ fn updatePlayMode(play: *Play) void {
         cosines[i] = std.math.cos(blob.angle);
         radiuses[i] = massToRadius(blob.mass);
 
-        const penalty_multipler: f32 = @min(1.0, @as(
-            f32, @max(0, @as(f32, @floatFromInt(blob.mass)))
-        ) / @as(f32, 10000));
+        const penalty_multipler: f32 = @min(1.0, @as(f32, @max(0, @as(f32, @floatFromInt(blob.mass)))) / @as(f32, 10000));
         const penalty: f32 = penalty_multipler * @as(f32, max_size_penalty);
         var speed_pt = (if (blob.dashing) base_speed_pt * 2 else base_speed_pt) - penalty;
 
         const diff_x: i32 = @intFromFloat(@floor(speed_pt * cosines[i]));
         const diff_y: i32 = @intFromFloat(@floor(speed_pt * sines[i]));
         const min: i32 = -arena_half_size_pt + radiuses[i];
-        const max: i32 =  arena_half_size_pt - radiuses[i];
+        const max: i32 = arena_half_size_pt - radiuses[i];
         blob.pos_pt = .{
             .x = clamp(i32, blob.pos_pt.x + diff_x, min, max),
             .y = clamp(i32, blob.pos_pt.y + diff_y, min, max),
@@ -750,7 +733,7 @@ fn updatePlayMode(play: *Play) void {
     // TODO: this *might* need some optimization?
     for (&global.blobs, 0..) |*blob, blob_index| {
         if (blob.mass == 0) continue;
-        for (global.blobs[blob_index+1..], blob_index+1..) |*other_blob, other_blob_index| {
+        for (global.blobs[blob_index + 1 ..], blob_index + 1..) |*other_blob, other_blob_index| {
             if (other_blob.mass == 0) continue;
             const dist: i32 = @intFromFloat(@floor(calcDistance(blob.pos_pt, other_blob.pos_pt)));
             if (dist > radiuses[blob_index] and dist > radiuses[other_blob_index])
@@ -763,7 +746,8 @@ fn updatePlayMode(play: *Play) void {
                 .{ .eater = blob, .eaten = other_blob }
             else if (radiuses[other_blob_index] > radiuses[blob_index])
                 .{ .eater = other_blob, .eaten = blob }
-            else continue;
+            else
+                continue;
             eatBlobTone(blobs.eater);
             blobs.eater.digesting += blobs.eaten.mass;
             blobs.eaten.mass = 0;
@@ -809,8 +793,7 @@ fn updatePlayMode(play: *Play) void {
         const my_radius: i32 = if (my_blob.mass == 0)
             min_radius_pt
         else
-            radiuses[w4.NETPLAY.* & 3]
-        ;
+            radiuses[w4.NETPLAY.* & 3];
         const my_desired_blob_radius_px: i32 = interpolateScale(
             i32,
             10,
@@ -829,7 +812,7 @@ fn updatePlayMode(play: *Play) void {
     // keep the camera in the arena
     const camera_center_pt: XY(i32) = blk: {
         const half_view_size_pt = 80 * points_per_pixel;
-        break :blk XY(i32) {
+        break :blk XY(i32){
             .x = clamp(
                 i32,
                 my_blob.pos_pt.x,
@@ -906,7 +889,8 @@ fn updatePlayMode(play: *Play) void {
         });
         w4.DRAW_COLORS.* = 0x40;
         w4.rect(
-            top_left.x, top_left.y,
+            top_left.x,
+            top_left.y,
             @intCast(bottom_right.x - top_left.x),
             @intCast(bottom_right.y - top_left.y),
         );
@@ -923,7 +907,7 @@ fn updatePlayMode(play: *Play) void {
             var it = std.mem.split(u8, msg, "\n");
             var line_num: i32 = 0;
             while (it.next()) |line| : (line_num += 1) {
-                textCenter(line, 30 + (12*line_num));
+                textCenter(line, 30 + (12 * line_num));
             }
         }
     }
@@ -949,7 +933,7 @@ fn updatePlayMode(play: *Play) void {
     }
 }
 
-fn drawBars(points_per_pixel: i32, center_pt: i32, dir: enum { x, y}) void {
+fn drawBars(points_per_pixel: i32, center_pt: i32, dir: enum { x, y }) void {
     w4.DRAW_COLORS.* = 0x02;
     const grid_size_pt = 8000;
     var i_pt: i32 = -arena_half_size_pt;

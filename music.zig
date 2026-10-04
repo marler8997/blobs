@@ -100,7 +100,7 @@ pub const melody = [_]Tone{
     .{ .frequency = b4 << 16 | c5, .duration = 20 },
     .{ .frequency = 0, .duration = 10 },
     .{ .frequency = a4 << 16 | b4, .duration = 20 },
-    .{ .frequency = 0, .duration = 10 }, 
+    .{ .frequency = 0, .duration = 10 },
     .{ .frequency = g4 << 16 | a4, .duration = 60 },
     .{ .frequency = f4 << 16 | g4, .duration = (20 << 8) },
-}; 
+};
